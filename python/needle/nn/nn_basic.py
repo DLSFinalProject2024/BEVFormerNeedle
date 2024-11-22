@@ -223,8 +223,8 @@ class Dropout(Module):
         if not self.training:
             return x
 
-        probs = init.randb(*x.shape, p=(1 - self.p)) # bit mask
-        return (probs * x) / (1.0 - self.p)
+        mask = init.randb(*x.shape, p=1 - self.p, device=x.device, dtype=x.dtype)
+        return x * mask / (1 - self.p)
 
 
 class Residual(Module):

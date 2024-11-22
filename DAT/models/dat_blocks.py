@@ -133,7 +133,7 @@ class DAttentionBaseline(nn.Module):
         self, q_size, kv_size, n_heads, n_head_channels, n_groups,
         attn_drop, proj_drop, stride, 
         offset_range_factor, use_pe, dwc_pe,
-        no_off, fixed_pe, ksize, log_cpb
+        no_off, fixed_pe, ksize, log_cpb, conv_qkv_bias=False
     ):
 
         super().__init__()
@@ -157,6 +157,8 @@ class DAttentionBaseline(nn.Module):
         self.stride = stride
         kk = self.ksize
         pad_size = kk // 2 if kk != stride else 0
+        #test
+        self.conv_qkv_bias = conv_qkv_bias
 
         self.conv_offset = nn.Sequential(
             nn.Conv2d(self.n_group_channels, self.n_group_channels, kk, stride, pad_size, groups=self.n_group_channels),
@@ -170,17 +172,17 @@ class DAttentionBaseline(nn.Module):
 
         self.proj_q = nn.Conv2d(
             self.nc, self.nc,
-            kernel_size=1, stride=1, padding=0
+            kernel_size=1, stride=1, padding=0, groups=self.n_groups, bias=self.conv_qkv_bias
         )
 
         self.proj_k = nn.Conv2d(
             self.nc, self.nc,
-            kernel_size=1, stride=1, padding=0
+            kernel_size=1, stride=1, padding=0, groups=self.n_groups, bias=self.conv_qkv_bias
         )
 
         self.proj_v = nn.Conv2d(
             self.nc, self.nc,
-            kernel_size=1, stride=1, padding=0
+            kernel_size=1, stride=1, padding=0, groups=self.n_groups, bias=self.conv_qkv_bias
         )
 
         self.proj_out = nn.Conv2d(
@@ -250,7 +252,13 @@ class DAttentionBaseline(nn.Module):
         B, C, H, W = x.size()
         dtype, device = x.dtype, x.device
 
+        #test
+        orig_x = x
+        #test
         q = self.proj_q(x)
+        #test
+        orig_q = q
+        #test
         q_off = einops.rearrange(q, 'b (g c) h w -> (b g) c h w', g=self.n_groups, c=self.n_group_channels)
         offset = self.conv_offset(q_off).contiguous()  # B * g 2 Hg Wg
         Hk, Wk = offset.size(2), offset.size(3)
@@ -278,7 +286,7 @@ class DAttentionBaseline(nn.Module):
             x_sampled = F.grid_sample(
                 input=x.reshape(B * self.n_groups, self.n_group_channels, H, W), 
                 grid=pos[..., (1, 0)], # y, x -> x, y
-                mode='bilinear', align_corners=False) # B * g, Cg, Hg, Wg
+                mode='bilinear', align_corners=True) # B * g, Cg, Hg, Wg
                 
 
         x_sampled = x_sampled.reshape(B, C, 1, n_sample)
@@ -312,7 +320,7 @@ class DAttentionBaseline(nn.Module):
                 attn_bias = F.grid_sample(
                     input=einops.rearrange(rpe_bias, 'b (g c) h w -> (b g) c h w', c=self.n_group_heads, g=self.n_groups),
                     grid=displacement[..., (1, 0)],
-                    mode='bilinear', align_corners=False) # B * g, h_g, HW, Ns
+                    mode='bilinear', align_corners=True) # B * g, h_g, HW, Ns
 
                 attn_bias = attn_bias.reshape(B * self.n_heads, H * W, n_sample)
                 attn = attn + attn_bias
@@ -326,10 +334,9 @@ class DAttentionBaseline(nn.Module):
             out = out + residual_lepe
         out = out.reshape(B, C, H, W)
 
-        #y = self.proj_drop(self.proj_out(out))
-        y = self.proj_out(out)
+        y = self.proj_drop(self.proj_out(out))
 
-        return y, pos.reshape(B, self.n_groups, Hk, Wk, 2), reference.reshape(B, self.n_groups, Hk, Wk, 2)
+        return y, pos.reshape(B, self.n_groups, Hk, Wk, 2), reference.reshape(B, self.n_groups, Hk, Wk, 2), orig_q, orig_x
 
 
 class PyramidAttention(nn.Module):

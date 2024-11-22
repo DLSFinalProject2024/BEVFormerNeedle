@@ -246,6 +246,7 @@ def summation(a, axes=None):
 
 class MatMul(TensorOp):
     def compute(self, a, b):
+        assert len(a.shape) == 2 and len(b.shape) == 2, "MatMul requires 2D arrays"
         return a @ b
 
     def gradient(self, out_grad, node):

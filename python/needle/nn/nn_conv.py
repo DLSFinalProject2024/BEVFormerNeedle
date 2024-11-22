@@ -1,6 +1,7 @@
 """The module.
 """
 from typing import List, Callable, Any
+import needle as ndl
 from needle.autograd import Tensor
 from needle import ops
 import needle.init as init
@@ -70,3 +71,141 @@ class Conv(Module):
 
         return x_out_nchw
         ### END YOUR SOLUTION
+
+class ConvGp(Module):
+    """
+    Multi-channel 2D convolutional layer supporting group convolution
+    IMPORTANT: Accepts inputs in NCHW format, outputs also in NCHW format
+    Only supports padding=same
+    No dilation
+    Only supports square kernels
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, groups=1, bias=True, device=None, dtype="float32"):
+        super().__init__()
+        if isinstance(kernel_size, tuple):
+            kernel_size = kernel_size[0]
+        if isinstance(stride, tuple):
+            stride = stride[0]
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.groups = groups
+
+        assert in_channels % groups == 0, "in_channels must be divisible by groups"
+        assert out_channels % groups == 0, "out_channels must be divisible by groups"
+
+        # Number of channels per group
+        self.in_channels_per_group = in_channels // groups
+        self.out_channels_per_group = out_channels // groups
+
+        ### BEGIN YOUR SOLUTION
+        # Initialize weight tensor with Kaiming Uniform
+        receptive_field = kernel_size*kernel_size
+        fan_in_recept = self.in_channels_per_group*receptive_field
+        #fan_out_recept = self.out_channels_per_group*receptive_field
+        fan_out_recept = self.out_channels*receptive_field
+
+        self.weight = Parameter(
+            init.kaiming_uniform(
+                fan_in=fan_in_recept,
+                fan_out=fan_out_recept,
+                shape=(out_channels, self.in_channels_per_group, kernel_size, kernel_size),
+                device=device, dtype=dtype, requires_grad=True
+            )
+        )        
+
+        # Initialize bias tensor, if applicable, with Uniform distribution
+        if bias:
+            bound = 1.0 / np.sqrt(fan_in_recept)
+            self.bias = Parameter(
+                init.rand(*(out_channels,), low=-bound, high=bound, device=device, dtype=dtype, requires_grad=True)
+            )
+        else:
+            self.bias = None        
+        ### END YOUR SOLUTION
+
+    def forward(self, x: Tensor) -> Tensor:
+        ### BEGIN YOUR SOLUTION
+        """
+        Forward pass for group convolution.
+        Args:
+            x (Tensor): Input tensor of shape (N, C_in, H, W).
+        Returns:
+            Tensor: Output tensor of shape (N, C_out, H_out, W_out).
+        """
+        N, C_in, H, W = x.shape
+        assert C_in == self.in_channels
+
+        # Transform input from NCHW -> NHWC
+        x_nhcw = ops.transpose(x, (1, 2))
+        x_nhwc = ops.transpose(x_nhcw, (2, 3))  # Shape: (N, H, W, C)
+
+        # Calculate the appropriate padding to ensure input and output dimensions are the same
+        padding = (self.kernel_size-1)//2
+
+        # Split input into groups along the channel axis
+        x_groups = ops.split(x_nhwc, axis=3)  # Each has shape (N, H, W, 1)
+
+        # Split weights into groups along the output channel axis
+        print(f"self.weight.shape = {self.weight.shape}")
+        print(f"self.weight")
+        print(f"isinstance(other, NDArray):{isinstance(self.weight, ndl.Tensor)}")
+        w_groups = ops.split(self.weight, axis=0)  # Each has shape (1, in_channels_per_group, K, K)
+
+        group_outputs = []
+
+        # Perform convolution for each group
+        for group_idx in range(self.groups):
+            # Stack the required slices for x_group
+            x_group = ops.stack(
+                [x_groups[group_idx * self.in_channels_per_group + i] for i in range(self.in_channels_per_group)],
+                axis=3,
+            )  # Shape: (N, H, W, in_channels_per_group)
+
+            assert np.linalg.norm(x_group.cached_data.numpy() - x_nhwc.data.numpy()) < 1e-5
+            input('pause1')
+
+
+            # Stack the required slices for w_group
+            w_group = ops.stack(
+                [w_groups[group_idx * self.out_channels_per_group + i] for i in range(self.out_channels_per_group)],
+                axis=0,
+            )  # Shape: (out_channels_per_group, in_channels_per_group, K, K)
+
+            assert np.linalg.norm(w_group.cached_data.numpy() - self.weight.data.numpy()) < 1e-5
+            input('pause2')
+
+            # Reshape weight for NHWC format
+            w_group_kiko = ops.transpose(w_group, (0, 3))  # Shape: (K, in_channels_per_group, K, out_channels_per_group)
+            w_group_kkio = ops.transpose(w_group_kiko, (1, 2))  # Shape: (K, K, in_channels_per_group, out_channels_per_group)
+
+            print(f"x_group.shape = {x_group.shape}")
+            print(f"w_group_kkio.shape = {w_group_kkio.shape}")
+            # Perform convolution using ops.conv
+            group_out = ops.conv(a=x_group, b=w_group_kkio, stride=self.stride, padding=padding)  # Shape: (N, H_out, W_out, out_channels_per_group)
+            group_outputs.append(group_out)
+
+        # Stack group outputs along the last dimension (channels)
+        out_nhwc_list = []
+        for group_out in group_outputs:
+            x_groups = ops.split(group_out, axis=3)  # Each has shape (N, H, W, 1)
+            for x in x_groups:
+                out_nhwc_list.append(x)
+
+        out_nhwc = ops.stack(out_nhwc_list, axis=3) #(N, H_out, W_out, C_out)
+        assert np.linalg.norm(out_nhwc.cached_data.numpy() - group_outputs[0].data.numpy()) < 1e-5
+        input('pause3')
+        print(f"out_nhwc.shape = {out_nhwc.shape}")
+        input('pause')
+
+        # Add bias if present
+        if self.bias:
+            bias_broadcast = ops.reshape(self.bias, (1, 1, 1, self.out_channels))  # Shape: (1, 1, 1, C_out)
+            out_nhwc = out_nhwc + ops.broadcast_to(bias_broadcast, out_nhwc.shape)# Shape: (N, H, W, C_out)
+
+        # Transform output back from NHWC -> NCHW
+        out_nhcw = ops.transpose(out_nhwc, (2, 3))  # Shape: (N, H, C_out, W)
+        out_nchw = ops.transpose(out_nhcw, (1, 2))  # Shape: (N, C_out, H_out, W_out)
+
+        return out_nchw

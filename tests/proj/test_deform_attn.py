@@ -5,13 +5,13 @@ import os
 sys.path.append("./python")
 import numpy as np
 import pytest
-import mugrade
 import needle as ndl
 from needle import backend_ndarray as nd
 import threading
 import time
 
 import torch
+import torch.nn
 # Lucidrians-Deformable Attention
 sys.path.append('./LUC')
 from deformable_attention import DeformableAttention
@@ -22,6 +22,8 @@ from deformable_attention_2d_local import DeformableAttention2DLocal
 # DAT-Deformable Attention
 sys.path.append('./DAT')
 from models.dat_blocks import DAttentionBaseline
+
+print(f"BACKEND = {ndl.BACKEND}")
 
 
 _DEVICES = [
@@ -50,6 +52,58 @@ def monitor_memory_usage():
         print(f"Memory usage: {mem_info.rss / (1024 ** 2):.2f} MB")
         time.sleep(0.05)  # Adjust the sleep interval as needed
 
+torch.manual_seed(42)
+conv_shapes = [
+    (1, 1, 1, 3),
+    #(1, 1, 2, 3)
+    #(1, 1, 4, 3)
+    #(1, 1, 4, 3)
+]
+x_shapes = [(1, 32, 64, 64)]
+conv_qkv_bias = [False]
+out_channels = [16]
+@pytest.mark.parametrize("out_channel", out_channels)
+@pytest.mark.parametrize("stride, padding, groups, kernel_size", conv_shapes)
+@pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
+@pytest.mark.parametrize("shape", x_shapes)
+@pytest.mark.parametrize("device", _DEVICES_ATTN)
+def test_deform_attn_group_conv(out_channel, stride, padding, groups, kernel_size, conv_qkv_bias, shape, device):
+    bs, in_channels, height, width = shape
+    print(f"")
+    print(f"bs = {bs}, in_channels = {in_channels}, height = {height}, width = {width}")
+    print(f"stride = {stride}, padding = {padding}, groups = {groups}, kernel_size = {kernel_size}, out_channel = {out_channel}")
+    print(f"conv_qkv_bias = {conv_qkv_bias}")
+
+    # Needle setup
+    needle_conv = ndl.nn.ConvGp(in_channels=in_channels, out_channels=out_channel, kernel_size=kernel_size, stride=stride, groups=groups, bias=conv_qkv_bias, device=device, dtype='float32')
+    #needle_conv = ndl.nn.Conv(in_channels=in_channels, out_channels=out_channel, kernel_size=kernel_size, stride=stride, bias=conv_qkv_bias, device=device, dtype='float32')
+
+    # PyTorch setup
+    pytorch_conv = torch.nn.Conv2d(in_channels=in_channels, out_channels=out_channel, kernel_size=kernel_size, stride=stride, padding=(kernel_size-1)//2, groups=groups, bias=conv_qkv_bias)
+
+#    pytorch_conv.weight.data = torch.tensor(needle_conv.weight.cached_data.numpy().transpose(3, 2, 0, 1))
+    pytorch_conv.weight.data = torch.tensor(needle_conv.weight.cached_data.numpy())
+    if conv_qkv_bias:
+        pytorch_conv.bias.data = torch.tensor(needle_conv.bias.cached_data.numpy())
+
+    # Input
+    np.random.seed(0)
+    x = ndl.init.rand(*(bs, in_channels, height, width), device=device, dtype='float32', requires_grad=True)
+    pytorch_input = torch.tensor(x.cached_data.numpy())
+
+    # Forward pass
+    pytorch_output = pytorch_conv(pytorch_input)  # NCHW
+    needle_output = needle_conv(x)
+
+    # Comparison
+    assert pytorch_conv.weight.shape == needle_conv.weight.shape
+    assert np.linalg.norm(pytorch_conv.weight.detach().numpy()-needle_conv.weight.detach().numpy()) < 1e-5 
+    if conv_qkv_bias:
+        assert np.linalg.norm(pytorch_conv.bias.detach().numpy()-needle_conv.bias.detach().numpy()) < 1e-5 
+        assert pytorch_conv.bias.shape == needle_conv.bias.shape
+
+    assert needle_output.shape == pytorch_output.shape
+    assert np.linalg.norm(needle_output.cached_data.numpy() - pytorch_output.data.numpy()) < 1e-3
 
 
 torch.manual_seed(42)
@@ -115,17 +169,25 @@ def test_deform_attn_compare_inputq(conv_qkv_bias, shape, device):
     if dat_attn.conv_qkv_bias is True:
         lucid_attn.conv_qkv_bias = dat_attn.conv_qkv_bias    
         lucid_attn.to_q.bias.data = dat_attn.proj_q.bias.clone()    
+        #print(f"lucid_attn.to_q.bias.shape = {lucid_attn.to_q.bias.shape}")
+        #print(f"dat_attn.proj_q.bias.shape = {dat_attn.proj_q.bias.shape}")
+        assert torch.allclose(dat_attn.proj_q.bias, lucid_attn.to_q.bias, atol=1e-5)
+        assert np.linalg.norm(dat_attn.proj_q.bias.detach().numpy()-lucid_attn.to_q.bias.detach().numpy()) < 1e-5 
 
     # Forward pass through Lucidrains' Deformable Attention
     dat_to_q_weight = dat_attn.proj_q.weight.data
     lucid_to_q_weight = lucid_attn.to_q.weight.data
+    #print(f"dat_to_q_weight.shape = {dat_to_q_weight.shape}")
+    #print(f"lucid_to_q_weight.shape = {lucid_to_q_weight.shape}")
     output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x = lucid_attn(x, return_vgrid=True)
 
     # Compare projection weight of q
+    assert dat_to_q_weight.shape == lucid_to_q_weight.shape
     assert torch.allclose(dat_to_q_weight, lucid_to_q_weight, atol=1e-5)
     assert np.linalg.norm(dat_to_q_weight.detach().numpy()-lucid_to_q_weight.detach().numpy()) < 1e-5 
 
     # Comapre original q
+    assert lucid_orig_q.shape == dat_orig_q.shape
     assert np.linalg.norm(lucid_orig_q.detach().numpy()-dat_orig_q.detach().numpy()) < 1e-5 
 
 

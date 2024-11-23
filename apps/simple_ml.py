@@ -9,6 +9,10 @@ import sys
 sys.path.append("python/")
 import needle as ndl
 
+import needle.nn as nn
+from apps.models import *
+import time
+device = ndl.cpu()
 
 def parse_mnist(image_filename, label_filename):
     """Read an images and labels file in MNIST format.  See this page:
@@ -123,6 +127,182 @@ def nn_epoch(X, y, W1, W2, lr=0.1, batch=100):
 
     return W1, W2
 
+### CIFAR-10 training ###
+def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None):
+    """
+    Iterates over the dataloader. If optimizer is not None, sets the
+    model to train mode, and for each batch updates the model parameters.
+    If optimizer is None, sets the model to eval mode, and simply computes
+    the loss/accuracy.
+
+    Args:
+        dataloader: Dataloader instance
+        model: nn.Module instance
+        loss_fn: nn.Module instance
+        opt: Optimizer instance (optional)
+
+    Returns:
+        avg_acc: average accuracy over dataset
+        avg_loss: average loss over dataset
+    """
+    np.random.seed(4)
+    ### BEGIN YOUR SOLUTION
+    raise NotImplementedError()
+    ### END YOUR SOLUTION
+
+
+def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
+          lr=0.001, weight_decay=0.001, loss_fn=nn.SoftmaxLoss):
+    """
+    Performs {n_epochs} epochs of training.
+
+    Args:
+        dataloader: Dataloader instance
+        model: nn.Module instance
+        n_epochs: number of epochs (int)
+        optimizer: Optimizer class
+        lr: learning rate (float)
+        weight_decay: weight decay (float)
+        loss_fn: nn.Module class
+
+    Returns:
+        avg_acc: average accuracy over dataset from last epoch of training
+        avg_loss: average loss over dataset from last epoch of training
+    """
+    np.random.seed(4)
+    ### BEGIN YOUR SOLUTION
+    raise NotImplementedError()
+    ### END YOUR SOLUTION
+
+
+def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
+    """
+    Computes the test accuracy and loss of the model.
+
+    Args:
+        dataloader: Dataloader instance
+        model: nn.Module instance
+        loss_fn: nn.Module class
+
+    Returns:
+        avg_acc: average accuracy over dataset
+        avg_loss: average loss over dataset
+    """
+    np.random.seed(4)
+    ### BEGIN YOUR SOLUTION
+    raise NotImplementedError()
+    ### END YOUR SOLUTION
+
+
+### PTB training ###
+def epoch_general_ptb(data, model, seq_len=40, loss_fn=nn.SoftmaxLoss(), opt=None,
+        clip=None, device=None, dtype="float32"):
+    """
+    Iterates over the data. If optimizer is not None, sets the
+    model to train mode, and for each batch updates the model parameters.
+    If optimizer is None, sets the model to eval mode, and simply computes
+    the loss/accuracy.
+
+    Args:
+        data: data of shape (nbatch, batch_size) given from batchify function
+        model: LanguageModel instance
+        seq_len: i.e. bptt, sequence length
+        loss_fn: nn.Module instance
+        opt: Optimizer instance (optional)
+        clip: max norm of gradients (optional)
+
+    Returns:
+        avg_acc: average accuracy over dataset
+        avg_loss: average loss over dataset
+    """
+    np.random.seed(4)
+
+    model.eval() if opt is None else model.train()
+    nbatch, batch_size = data.shape
+    errs = []
+    losses = []
+    h_prev = None
+
+    for i in range(nbatch - seq_len):
+        X, y = ndl.data.get_batch(data, i, seq_len, device=device, dtype=dtype)
+        output, h_prev = model(X, h_prev)
+        loss = loss_fn(output, y)
+        
+        if model.training:
+            opt.reset_grad()
+            loss.backward()
+            if clip:  # Optional, not implemented
+                nn.utils.clip_grad_norm_(model.parameters(), clip)
+            opt.step()
+
+        errs.append((output.numpy().argmax(1) != y.numpy()).sum().item())
+        losses.append(loss.numpy().item())
+
+        # Detach hidden states to prevent backprop through entire sequence
+        if isinstance(h_prev, tuple):  # LSTM
+            h, c = h_prev
+            h_prev = (h.detach(), c.detach())
+        else:  # RNN
+            h_prev = h_prev.detach()
+
+    avg_acc = 1 - sum(errs) / (nbatch - seq_len)
+    avg_loss = sum(losses) / (nbatch - seq_len)
+    return avg_acc, avg_loss
+
+
+def train_ptb(model, data, seq_len=40, n_epochs=1, optimizer=ndl.optim.SGD,
+          lr=4.0, weight_decay=0.0, loss_fn=nn.SoftmaxLoss, clip=None,
+          device=None, dtype="float32"):
+    """
+    Performs {n_epochs} epochs of training.
+
+    Args:
+        model: LanguageModel instance
+        data: data of shape (nbatch, batch_size) given from batchify function
+        seq_len: i.e. bptt, sequence length
+        n_epochs: number of epochs (int)
+        optimizer: Optimizer class
+        lr: learning rate (float)
+        weight_decay: weight decay (float)
+        loss_fn: nn.Module class
+        clip: max norm of gradients (optional)
+
+    Returns:
+        avg_acc: average accuracy over dataset from last epoch of training
+        avg_loss: average loss over dataset from last epoch of training
+    """
+    np.random.seed(4)
+    
+    opt = optimizer(model.parameters(), lr=lr, weight_decay=weight_decay)
+    for epoch in range(n_epochs):
+        avg_acc, avg_loss = epoch_general_ptb(data, model, seq_len=seq_len, loss_fn=loss_fn(),
+            opt=opt, clip=clip, device=device, dtype=dtype)
+        
+        # print(f"Epoch {epoch+1}: avg_acc={avg_acc:.3f}, avg_loss={avg_loss:.3f}")
+    
+    # return np.array(avg_acc), np.array(avg_loss)
+    return avg_acc, avg_loss
+
+def evaluate_ptb(model, data, seq_len=40, loss_fn=nn.SoftmaxLoss,
+        device=None, dtype="float32"):
+    """
+    Computes the test accuracy and loss of the model.
+
+    Args:
+        model: LanguageModel instance
+        data: data of shape (nbatch, batch_size) given from batchify function
+        seq_len: i.e. bptt, sequence length
+        loss_fn: nn.Module class
+
+    Returns:
+        avg_acc: average accuracy over dataset
+        avg_loss: average loss over dataset
+    """
+    np.random.seed(4)
+    
+    avg_acc, avg_loss = epoch_general_ptb(data, model, seq_len=seq_len, loss_fn=loss_fn(),
+        opt=None, device=device, dtype=dtype)
+    return avg_acc, avg_loss
 
 ### CODE BELOW IS FOR ILLUSTRATION, YOU DO NOT NEED TO EDIT
 

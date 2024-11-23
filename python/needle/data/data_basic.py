@@ -78,6 +78,5 @@ class DataLoader:
         datas = self.dataset[batch_indices]
         self.current_batch_idx += 1
         
-        # import pdb; pdb.set_trace()
         # Return the actual data corresponding to the batch indices
         return [Tensor(data) for data in datas]

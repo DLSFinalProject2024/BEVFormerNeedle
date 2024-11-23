@@ -5,7 +5,7 @@ from ..autograd import TensorTuple, TensorTupleOp
 
 from .ops_mathematic import *
 
-import numpy as array_api
+from ..backend_selection import array_api, BACKEND 
 
 class LogSoftmax(TensorOp):
     def compute(self, Z):
@@ -29,13 +29,14 @@ def logsoftmax(a):
 # This uses the same conventions as `needle.ops.Summation()`
 class LogSumExp(TensorOp):
     def __init__(self, axes: Optional[tuple] = None):
+        if isinstance(axes, int):
+            axes = (axes,)
         self.axes = axes
         self.max_Z = None # for reuse in gradient
 
     def compute(self, Z):
-        self.max_Z = array_api.max(Z, axis=self.axes, keepdims=True)
-
-        diff = Z - self.max_Z
+        self.max_Z = Z.max(axis=self.axes, keepdims=True)
+        diff = Z - self.max_Z.broadcast_to(Z.shape)
         e = array_api.exp(diff)
         se = array_api.sum(e, axis=self.axes) # don't keepdims
         lse = array_api.log(se)
@@ -61,7 +62,9 @@ class LogSumExp(TensorOp):
             shape[axis] = 1
 
         # Note: by default summation will not keepdims
-        softmax = exp(Z - self.max_Z) / summation(exp(Z - self.max_Z), axes=self.axes).reshape(shape)
+        # TODO: make it simpler, find out the correct shape of each term
+        diff = Z - self.max_Z.broadcast_to(Z.shape)
+        softmax = exp(diff) / summation(exp(diff), axes=self.axes).reshape(shape).broadcast_to(Z.shape)
         out_grad = out_grad.reshape(shape).broadcast_to(Z.shape)
 
         return out_grad * softmax

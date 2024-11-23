@@ -26,7 +26,7 @@ class Conv(Module):
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.stride = stride
-        self.padding = kernel_size // 2
+        self.padding = (kernel_size - 1) // 2
 
         # Initialize weights
         fan_in = in_channels * kernel_size * kernel_size

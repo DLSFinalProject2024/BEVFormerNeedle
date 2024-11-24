@@ -55,13 +55,15 @@ def monitor_memory_usage():
 torch.manual_seed(42)
 conv_shapes = [
     (1, 1, 1, 3),
-    #(1, 1, 2, 3)
-    #(1, 1, 4, 3)
-    #(1, 1, 4, 3)
+    (1, 1, 2, 3),
+    (1, 1, 4, 3),
+    (1, 1, 4, 3)
 ]
-x_shapes = [(1, 32, 64, 64)]
-conv_qkv_bias = [False]
-out_channels = [16]
+x_shapes = [(1, 32, 64, 64), 
+            (2, 32, 64, 64),
+            (4, 16, 32, 32)]
+conv_qkv_bias = [False, True]
+out_channels = [16, 32, 64]
 @pytest.mark.parametrize("out_channel", out_channels)
 @pytest.mark.parametrize("stride, padding, groups, kernel_size", conv_shapes)
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
@@ -69,11 +71,6 @@ out_channels = [16]
 @pytest.mark.parametrize("device", _DEVICES_ATTN)
 def test_deform_attn_group_conv(out_channel, stride, padding, groups, kernel_size, conv_qkv_bias, shape, device):
     bs, in_channels, height, width = shape
-    print(f"")
-    print(f"bs = {bs}, in_channels = {in_channels}, height = {height}, width = {width}")
-    print(f"stride = {stride}, padding = {padding}, groups = {groups}, kernel_size = {kernel_size}, out_channel = {out_channel}")
-    print(f"conv_qkv_bias = {conv_qkv_bias}")
-
     # Needle setup
     needle_conv = ndl.nn.ConvGp(in_channels=in_channels, out_channels=out_channel, kernel_size=kernel_size, stride=stride, groups=groups, bias=conv_qkv_bias, device=device, dtype='float32')
     #needle_conv = ndl.nn.Conv(in_channels=in_channels, out_channels=out_channel, kernel_size=kernel_size, stride=stride, bias=conv_qkv_bias, device=device, dtype='float32')
@@ -81,7 +78,7 @@ def test_deform_attn_group_conv(out_channel, stride, padding, groups, kernel_siz
     # PyTorch setup
     pytorch_conv = torch.nn.Conv2d(in_channels=in_channels, out_channels=out_channel, kernel_size=kernel_size, stride=stride, padding=(kernel_size-1)//2, groups=groups, bias=conv_qkv_bias)
 
-#    pytorch_conv.weight.data = torch.tensor(needle_conv.weight.cached_data.numpy().transpose(3, 2, 0, 1))
+    #pytorch_conv.weight.data = torch.tensor(needle_conv.weight.cached_data.numpy().transpose(3, 2, 0, 1))
     pytorch_conv.weight.data = torch.tensor(needle_conv.weight.cached_data.numpy())
     if conv_qkv_bias:
         pytorch_conv.bias.data = torch.tensor(needle_conv.bias.cached_data.numpy())

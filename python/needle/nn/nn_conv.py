@@ -113,7 +113,7 @@ class ConvGp(Module):
                 shape=(out_channels, self.in_channels_per_group, kernel_size, kernel_size),
                 device=device, dtype=dtype, requires_grad=True
             )
-        )        
+        )
 
         # Initialize bias tensor, if applicable, with Uniform distribution
         if bias:
@@ -148,9 +148,6 @@ class ConvGp(Module):
         x_groups = ops.split(x_nhwc, axis=3)  # Each has shape (N, H, W, 1)
 
         # Split weights into groups along the output channel axis
-        print(f"self.weight.shape = {self.weight.shape}")
-        print(f"self.weight")
-        print(f"isinstance(other, NDArray):{isinstance(self.weight, ndl.Tensor)}")
         w_groups = ops.split(self.weight, axis=0)  # Each has shape (1, in_channels_per_group, K, K)
 
         group_outputs = []
@@ -163,9 +160,6 @@ class ConvGp(Module):
                 axis=3,
             )  # Shape: (N, H, W, in_channels_per_group)
 
-            assert np.linalg.norm(x_group.cached_data.numpy() - x_nhwc.data.numpy()) < 1e-5
-            input('pause1')
-
 
             # Stack the required slices for w_group
             w_group = ops.stack(
@@ -173,15 +167,11 @@ class ConvGp(Module):
                 axis=0,
             )  # Shape: (out_channels_per_group, in_channels_per_group, K, K)
 
-            assert np.linalg.norm(w_group.cached_data.numpy() - self.weight.data.numpy()) < 1e-5
-            input('pause2')
-
             # Reshape weight for NHWC format
-            w_group_kiko = ops.transpose(w_group, (0, 3))  # Shape: (K, in_channels_per_group, K, out_channels_per_group)
-            w_group_kkio = ops.transpose(w_group_kiko, (1, 2))  # Shape: (K, K, in_channels_per_group, out_channels_per_group)
+            w_group_kiok = ops.transpose(w_group, (0, 2))  # Shape: (K, in_channels_per_group, out_channels_per_group, K)
+            w_group_kkoi = ops.transpose(w_group_kiok, (1, 3))  # Shape: (K, K, out_channels_per_group, in_channels_per_group)
+            w_group_kkio = ops.transpose(w_group_kkoi, (2, 3))  # Shape: (K, K, out_channels_per_group, in_channels_per_group)
 
-            print(f"x_group.shape = {x_group.shape}")
-            print(f"w_group_kkio.shape = {w_group_kkio.shape}")
             # Perform convolution using ops.conv
             group_out = ops.conv(a=x_group, b=w_group_kkio, stride=self.stride, padding=padding)  # Shape: (N, H_out, W_out, out_channels_per_group)
             group_outputs.append(group_out)
@@ -194,10 +184,6 @@ class ConvGp(Module):
                 out_nhwc_list.append(x)
 
         out_nhwc = ops.stack(out_nhwc_list, axis=3) #(N, H_out, W_out, C_out)
-        assert np.linalg.norm(out_nhwc.cached_data.numpy() - group_outputs[0].data.numpy()) < 1e-5
-        input('pause3')
-        print(f"out_nhwc.shape = {out_nhwc.shape}")
-        input('pause')
 
         # Add bias if present
         if self.bias:

@@ -8,3 +8,9 @@ make
 ```
 
 Install the dataset from executing `prepare.ipynb`.
+
+## Testing implementation correctness
+```bash
+python3 -m pytest -l -v -k "patch_embedding"
+```
+

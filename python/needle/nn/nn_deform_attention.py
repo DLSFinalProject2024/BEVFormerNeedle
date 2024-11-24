@@ -131,7 +131,7 @@ class DeformableAttention(Module):
         Output: z with shape (batch_size, in_channels, height, width), NCHW
         """
 
-        heads, Bin, Cin, Hin, Win, downsample_factor, device = self.heads, x.shape[0], *x.shape[1:], self.downsample_factor, x.device
+        heads, Bin, Cin, Hin, Win, downsample_factor, device = self.heads, *x.shape, self.downsample_factor, x.device
 
         # queries
         q = self.to_q(x)

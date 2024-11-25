@@ -101,7 +101,7 @@ class DeformableAttention2DLocal(nn.Module):
         downsample_factor = 4,
         offset_scale = None,
         offset_groups = None,
-        offset_kernel_size = 6,
+        offset_kernel_size = 5,
         group_queries = True,
         group_key_values = True,
         conv_qkv_bias = False
@@ -109,7 +109,10 @@ class DeformableAttention2DLocal(nn.Module):
         super().__init__()
         offset_scale = default(offset_scale, downsample_factor)
         assert offset_kernel_size >= downsample_factor, 'offset kernel size must be greater than or equal to the downsample factor'
-        assert divisible_by(offset_kernel_size - downsample_factor, 2)
+
+        # Only to make sure padding = (offset_kernel_size - downsample_factor)/2 is integer.
+        # Since I always set 'same' padding, padding = (offset_kernel_size -1)/2, I do not need this assertion.
+        #assert divisible_by(offset_kernel_size - downsample_factor, 2)
 
         offset_groups = default(offset_groups, heads)
         assert divisible_by(heads, offset_groups)
@@ -123,13 +126,31 @@ class DeformableAttention2DLocal(nn.Module):
 
         self.downsample_factor = downsample_factor
 
+        self.to_offsets_test = nn.Sequential(
+            nn.Conv2d(offset_dims, offset_dims, offset_kernel_size, groups = offset_dims, stride = downsample_factor, bias=True, padding=(offset_kernel_size-1)//2),
+            nn.GELU(approximate='tanh'),
+            nn.Conv2d(offset_dims, 2, 1, bias = False),
+            nn.Tanh(),
+            Scale(offset_scale)
+        )
+
         self.to_offsets = nn.Sequential(
-            nn.Conv2d(offset_dims, offset_dims, offset_kernel_size, groups = offset_dims, stride = downsample_factor, padding = (offset_kernel_size - downsample_factor) // 2),
+            nn.Conv2d(offset_dims, offset_dims, offset_kernel_size, groups = offset_dims, stride = downsample_factor, bias=True, padding=(offset_kernel_size - 1) // 2),
+            nn.GELU(approximate='tanh'),
+            nn.Conv2d(offset_dims, 2, 1, bias = False),
+            nn.Tanh(),
+            Scale(offset_scale)
+        )
+
+        '''
+        self.to_offsets = nn.Sequential(
+            nn.Conv2d(offset_dims, offset_dims, offset_kernel_size, groups = offset_dims, stride = downsample_factor, padding = (offset_kernel_size - downsample_factor) // 2), #original setting
             nn.GELU(),
             nn.Conv2d(offset_dims, 2, 1, bias = False),
             nn.Tanh(),
             Scale(offset_scale)
         )
+        '''
 
         self.rel_pos_bias = CPB(dim // 4, offset_groups = offset_groups, heads = heads, depth = 2)
 
@@ -139,7 +160,7 @@ class DeformableAttention2DLocal(nn.Module):
         self.to_v = nn.Conv2d(dim, inner_dim, 1, groups = offset_groups if group_key_values else 1, bias = conv_qkv_bias)
         self.to_out = nn.Conv2d(inner_dim, dim, 1)
 
-    def forward(self, x, return_vgrid = False):
+    def forward(self, x, return_vgrid=False, return_offsets=False, return_norm_vgrid=False):
         """
         b - batch
         h - heads
@@ -162,6 +183,7 @@ class DeformableAttention2DLocal(nn.Module):
         group = lambda t: rearrange(t, 'b (g d) ... -> (b g) d ...', g = self.offset_groups)
 
         grouped_queries = group(q)
+        offsets_test = self.to_offsets_test(grouped_queries)
         offsets = self.to_offsets(grouped_queries)
 
         # calculate grid + offsets
@@ -216,7 +238,13 @@ class DeformableAttention2DLocal(nn.Module):
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
         out = self.to_out(out)
 
-        if return_vgrid:
-            return out, vgrid, orig_q, orig_x
+        if return_norm_vgrid:
+            return offsets, vgrid_scaled
 
-        return out, orig_q, orig_x
+        if return_offsets:
+            return grouped_queries, offsets_test
+
+        if return_vgrid:
+            return out, vgrid, orig_q, orig_x, grouped_queries
+
+        return out, orig_q, orig_x, grouped_queries

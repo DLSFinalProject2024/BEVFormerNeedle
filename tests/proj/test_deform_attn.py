@@ -53,6 +53,196 @@ def monitor_memory_usage():
         time.sleep(0.05)  # Adjust the sleep interval as needed
 
 torch.manual_seed(42)
+x_shapes = [(1, 32, 64, 64),
+            (4, 32, 32, 32),
+            (8, 32, 64, 64),
+            (16, 32, 16, 16)]
+conv_qkv_bias = [False, True]
+#x_shapes = [(1, 512, 64, 64)] #will be Killed
+@pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
+@pytest.mark.parametrize("shape", x_shapes)
+@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+def test_deform_attn_compare_lucid_our_normalized_grid(conv_qkv_bias, shape, device):
+    # Launch a new thread to monitor the memory usage
+    #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
+    #monitor_thread.start()
+
+    # Lucidrains Deformable Attention Initialization
+    lucid_attn = DeformableAttention2DLocal(
+        dim=32,                        # Feature dimensions (C = 32)
+        dim_head=4,                    # Dimension per head
+        heads=8,                       # Attention heads
+        dropout=0.,                    # Dropout
+        downsample_factor=4,           # Downsample factor
+        offset_scale=4,                # Offset scale
+        offset_groups=2,              # No offset groups
+        offset_kernel_size=5,           # Offset kernel size
+        group_queries=True,
+        group_key_values=False,
+        conv_qkv_bias=conv_qkv_bias
+    )
+
+    # Ours Deformable Attention Initialization
+    our_attn = ndl.nn.DeformableAttention(
+        dim=32,                        # Feature dimensions (C = 32)
+        dim_head=4,                    # Dimension per head
+        heads=8,                       # Attention heads
+        dropout=0.,                    # Dropout
+        downsample_factor=4,           # Downsample factor
+        offset_scale=4,                # Offset scale
+        offset_groups=2,              # No offset groups
+        offset_kernel_size=5,           # Offset kernel size
+        group_queries=True,
+        group_key_values=False,
+        to_q_bias = conv_qkv_bias,
+        to_k_bias = conv_qkv_bias,
+        to_v_bias = conv_qkv_bias,
+        to_out_bias = conv_qkv_bias,
+        device=device,
+        dtype='float32'
+    )
+
+    batch_size = shape[0]
+    channels   = shape[1]
+    height     = shape[2]
+    width      = shape[3]
+
+    np.random.seed(0)
+    x = ndl.init.rand(*(batch_size, channels, height, width), device=device, dtype='float32', requires_grad=True)
+    pytorch_input = torch.tensor(x.cached_data.numpy())
+
+    # (Optional) Copy biases if needed
+    if conv_qkv_bias is True:
+        lucid_attn.to_q.bias.data = torch.tensor(our_attn.to_q.bias.cached_data.numpy())
+        assert lucid_attn.to_q.bias.shape == our_attn.to_q.bias.shape
+        assert np.linalg.norm(lucid_attn.to_q.bias.detach().numpy()-our_attn.to_q.bias.detach().numpy()) < 1e-5 
+
+    # Copy weights
+    lucid_attn.to_q.weight.data = torch.tensor(our_attn.to_q.weight.cached_data.numpy())
+    assert lucid_attn.to_q.weight.shape == our_attn.to_q.weight.shape
+    assert np.linalg.norm(lucid_attn.to_q.weight.detach().numpy()-our_attn.to_q.weight.detach().numpy()) < 1e-5 
+
+    # Copy offset network weights, for offset network layer0 and layer2 (ConvGp)
+    for i in [0, 2]:
+        sub_module = lucid_attn.to_offsets[i]
+        sub_module.weight.data = torch.tensor(our_attn.to_offsets.modules[i].weight.cached_data.numpy())
+        assert sub_module.weight.shape == our_attn.to_offsets.modules[i].weight.shape
+        assert np.linalg.norm(sub_module.weight.detach().numpy()-our_attn.to_offsets.modules[i].weight.detach().numpy()) < 1e-5 
+
+        if i == 0:
+            sub_module.bias.data = torch.tensor(our_attn.to_offsets.modules[i].bias.cached_data.numpy())
+            assert sub_module.bias.shape == our_attn.to_offsets.modules[i].bias.shape
+            assert np.linalg.norm(sub_module.bias.detach().numpy()-our_attn.to_offsets.modules[i].bias.detach().numpy()) < 1e-5 
+
+    # Forward pass
+    lucid_offsets_q, lucid_norm_grid = lucid_attn(pytorch_input, return_norm_vgrid=True)
+    output_our, grouped_q_our, offsets_q_our, norm_grid_our = our_attn(x, return_norm_vgrid=True)
+
+    # Comapre offsets
+    assert lucid_offsets_q.shape == offsets_q_our.shape
+    assert np.linalg.norm(lucid_offsets_q.detach().numpy()-offsets_q_our.detach().numpy()) < 1e-3 
+
+    # Comapre outputs
+    assert lucid_norm_grid.shape == norm_grid_our.shape
+    assert np.linalg.norm(lucid_norm_grid.detach().numpy()-norm_grid_our.detach().numpy()) < 1e-3 
+
+
+torch.manual_seed(42)
+x_shapes = [(1, 32, 64, 64),
+            (4, 32, 32, 32),
+            (8, 32, 64, 64),
+            (16, 32, 16, 16)]
+conv_qkv_bias = [False, True]
+#x_shapes = [(1, 512, 64, 64)] #will be Killed
+@pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
+@pytest.mark.parametrize("shape", x_shapes)
+@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+def test_deform_attn_compare_lucid_our_offset(conv_qkv_bias, shape, device):
+    # Launch a new thread to monitor the memory usage
+    #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
+    #monitor_thread.start()
+
+    # Lucidrains Deformable Attention Initialization
+    lucid_attn = DeformableAttention2DLocal(
+        dim=32,                        # Feature dimensions (C = 32)
+        dim_head=4,                    # Dimension per head
+        heads=8,                       # Attention heads
+        dropout=0.,                    # Dropout
+        downsample_factor=4,           # Downsample factor
+        offset_scale=4,                # Offset scale
+        offset_groups=2,              # No offset groups
+        offset_kernel_size=5,           # Offset kernel size
+        group_queries=True,
+        group_key_values=False,
+        conv_qkv_bias=conv_qkv_bias
+    )
+
+    # Ours Deformable Attention Initialization
+    our_attn = ndl.nn.DeformableAttention(
+        dim=32,                        # Feature dimensions (C = 32)
+        dim_head=4,                    # Dimension per head
+        heads=8,                       # Attention heads
+        dropout=0.,                    # Dropout
+        downsample_factor=4,           # Downsample factor
+        offset_scale=4,                # Offset scale
+        offset_groups=2,              # No offset groups
+        offset_kernel_size=5,           # Offset kernel size
+        group_queries=True,
+        group_key_values=False,
+        to_q_bias = conv_qkv_bias,
+        to_k_bias = conv_qkv_bias,
+        to_v_bias = conv_qkv_bias,
+        to_out_bias = conv_qkv_bias,
+        device=device,
+        dtype='float32'
+    )
+
+    batch_size = shape[0]
+    channels   = shape[1]
+    height     = shape[2]
+    width      = shape[3]
+
+    np.random.seed(0)
+    x = ndl.init.rand(*(batch_size, channels, height, width), device=device, dtype='float32', requires_grad=True)
+    pytorch_input = torch.tensor(x.cached_data.numpy())
+
+    # (Optional) Copy biases if needed
+    if conv_qkv_bias is True:
+        lucid_attn.to_q.bias.data = torch.tensor(our_attn.to_q.bias.cached_data.numpy())
+        assert lucid_attn.to_q.bias.shape == our_attn.to_q.bias.shape
+        assert np.linalg.norm(lucid_attn.to_q.bias.detach().numpy()-our_attn.to_q.bias.detach().numpy()) < 1e-5 
+
+    # Copy weights
+    lucid_attn.to_q.weight.data = torch.tensor(our_attn.to_q.weight.cached_data.numpy())
+    assert lucid_attn.to_q.weight.shape == our_attn.to_q.weight.shape
+    assert np.linalg.norm(lucid_attn.to_q.weight.detach().numpy()-our_attn.to_q.weight.detach().numpy()) < 1e-5 
+
+    # Copy offset network weights, for offset network layer0 and layer2 (ConvGp)
+    for i in [0, 2]:
+        sub_module = lucid_attn.to_offsets_test[i]
+        sub_module.weight.data = torch.tensor(our_attn.to_offsets.modules[i].weight.cached_data.numpy())
+        assert sub_module.weight.shape == our_attn.to_offsets.modules[i].weight.shape
+        assert np.linalg.norm(sub_module.weight.detach().numpy()-our_attn.to_offsets.modules[i].weight.detach().numpy()) < 1e-5 
+
+        if i == 0:
+            sub_module.bias.data = torch.tensor(our_attn.to_offsets.modules[i].bias.cached_data.numpy())
+            assert sub_module.bias.shape == our_attn.to_offsets.modules[i].bias.shape
+            assert np.linalg.norm(sub_module.bias.detach().numpy()-our_attn.to_offsets.modules[i].bias.detach().numpy()) < 1e-5 
+
+    # Forward pass
+    lucid_grouped_q, lucid_offsets_q = lucid_attn(pytorch_input, return_offsets=True)
+    output_our, grouped_q_our, offsets_q_our = our_attn(x)
+
+    # Comapre grouped_q
+    assert lucid_grouped_q.shape == grouped_q_our.shape
+    assert np.linalg.norm(lucid_grouped_q.detach().numpy()-grouped_q_our.detach().numpy()) < 1e-3 
+
+    # Comapre output
+    assert lucid_offsets_q.shape == offsets_q_our.shape
+    assert np.linalg.norm(lucid_offsets_q.detach().numpy()-offsets_q_our.detach().numpy()) < 1e-3 
+
+
+torch.manual_seed(42)
 x_shapes = [(1, 32, 64, 64)]
 conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
@@ -120,12 +310,16 @@ def test_deform_attn_compare_lucid_our_inputq(conv_qkv_bias, shape, device):
     assert np.linalg.norm(lucid_attn.to_q.weight.detach().numpy()-our_attn.to_q.weight.detach().numpy()) < 1e-5 
 
     # Forward pass
-    output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x = lucid_attn(pytorch_input, return_vgrid=True)
-    output_our = our_attn(x, return_vgrid=True)
+    output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x, lucid_grouped_q = lucid_attn(pytorch_input, return_vgrid=True)
+    output_our, grouped_q_our, offsets_q_our = our_attn(x, return_vgrid=True)
 
     # Comapre original q
     assert lucid_orig_q.shape == output_our.shape
     assert np.linalg.norm(lucid_orig_q.detach().numpy()-output_our.detach().numpy()) < 1e-3 
+
+    # Comapre grouped_q
+    assert lucid_grouped_q.shape == grouped_q_our.shape
+    assert np.linalg.norm(lucid_grouped_q.detach().numpy()-grouped_q_our.detach().numpy()) < 1e-3 
 
 torch.manual_seed(42)
 conv_shapes = [
@@ -251,7 +445,7 @@ def test_deform_attn_compare_inputq(conv_qkv_bias, shape, device):
     lucid_to_q_weight = lucid_attn.to_q.weight.data
     #print(f"dat_to_q_weight.shape = {dat_to_q_weight.shape}")
     #print(f"lucid_to_q_weight.shape = {lucid_to_q_weight.shape}")
-    output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x = lucid_attn(x, return_vgrid=True)
+    output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x, lucid_grouped_q = lucid_attn(x, return_vgrid=True)
 
     # Compare projection weight of q
     assert dat_to_q_weight.shape == lucid_to_q_weight.shape
@@ -316,7 +510,7 @@ def test_deform_attn_compare_inputx(shape, device):
     output_dat, dat_offsets, dat_ref, dat_orig_q, dat_orig_x = dat_attn(x)    
 
     # Forward pass through Lucidrains' Deformable Attention
-    output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x = lucid_attn(x, return_vgrid=True)
+    output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x, lucid_grouped_q = lucid_attn(x, return_vgrid=True)
 
     # Comapre original q
     assert lucid_orig_x.shape == dat_orig_x.shape

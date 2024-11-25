@@ -618,8 +618,8 @@ class NDArray:
         assert len(grid.shape) == 4
         b, c, h, w = self.shape
         assert grid.shape == (b, h, w, 2)
-        out = NDArray.make(self.shape, device=self.device)
-        self = self.pad((0,0), (0,0), (1,1), (1,1))
+        out = self.device.full(self.shape, 0, dtype=self.dtype)
+        self = self.pad(((0,0), (0,0), (1,1), (1,1)))
         self.device.grid_sample(self._handle, grid._handle, out._handle, (b, c, h, w))
         return out
 

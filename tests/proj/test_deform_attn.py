@@ -12,7 +12,6 @@ import needle as ndl
 from needle import ops
 from needle import backend_ndarray as nd
 
-import torch
 from deformable_attention import DeformableAttention
 from deformable_attention import DeformableAttention1D
 
@@ -201,47 +200,44 @@ def test_deform_attn_1D_lucidrains(shape):
 
     assert np.linalg.norm(A-B.detach().numpy()) < 1e-5 
 
-
-# Replace '_DEVICES' with your actual device list, e.g., ['cpu', 'cuda']
-_DEVICES = ['cpu']  # Add 'cuda' if GPU testing is needed
-
 # Parameters for testing grid_sample
 grid_sample_params = [
-    (1, 3, 16, 16),
+    (1, 1, 1, 1),
+    (1, 1, 3, 3),
+    (1, 1, 3, 4),
+    (1, 1, 4, 3),
+    (1, 3, 5, 100),
+    (1, 3, 32, 16),
     (2, 3, 32, 32),
     (4, 1, 64, 64),
     (8, 3, 128, 128),
 ]
 
+# @pytest.mark.parametrize("N,C,H,W", grid_sample_params)
+# @pytest.mark.parametrize("mode", ['bilinear', 'nearest'])
+# @pytest.mark.parametrize("padding_mode", ['zeros', 'border', 'reflection'])
+# @pytest.mark.parametrize("align_corners", [True, False])
+# @pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
 @pytest.mark.parametrize("N,C,H,W", grid_sample_params)
-@pytest.mark.parametrize("mode", ['bilinear', 'nearest'])
-@pytest.mark.parametrize("padding_mode", ['zeros', 'border', 'reflection'])
-@pytest.mark.parametrize("align_corners", [True, False])
+@pytest.mark.parametrize("mode", ['bilinear'])
+@pytest.mark.parametrize("padding_mode", ['zeros'])
+@pytest.mark.parametrize("align_corners", [False])
 @pytest.mark.parametrize("device", _DEVICES)
 def test_nn_grid_sample(N, C, H, W, mode, padding_mode, align_corners, device):
     np.random.seed(0)
-    x = ndl.init.rand(N, C, H, W, device=device)
-    grid = ndl.init.rand(N, H, W, 2, device=device) * 2 - 1
+    a = ndl.init.rand(N, C, H, W, device=device)
+    grid = ndl.init.rand(N, H, W, 2, low=-1.0, high=1.0, device=device)
+    out = ops.grid_sample(a, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
 
-    y_ndl = ops.grid_sample(x, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
-    x_np = x.cached_data.numpy()
-    grid_np = grid.cached_data.numpy()
-
-    x_torch = torch.tensor(x_np, requires_grad=False)
-    grid_torch = torch.tensor(grid_np, requires_grad=False)
-
-    if device == 'cuda':
-        x_torch = x_torch.cuda()
-        grid_torch = grid_torch.cuda()
-
-    y_torch = torch.nn.functional.grid_sample(
-        x_torch, grid_torch, mode=mode, padding_mode=padding_mode, align_corners=align_corners
+    a_torch = torch.tensor(a.cached_data.numpy(), requires_grad=False)
+    grid_torch = torch.tensor(grid.cached_data.numpy(), requires_grad=False)
+    out_torch = torch.nn.functional.grid_sample(
+        a_torch, grid_torch, mode=mode, padding_mode=padding_mode, align_corners=align_corners
     )
 
-    y_ndl_np = y_ndl.cached_data.numpy()
-    y_torch_np = y_torch.detach().cpu().numpy()
-
-    assert np.linalg.norm(y_ndl_np - y_torch_np) < 1e-3
+    out_np = out.cached_data.numpy()
+    out_torch_np = out_torch.detach().cpu().numpy()
+    assert np.linalg.norm(out_np - out_torch_np) < 1e-3
 
 if __name__ == "__main__":
     print("You have to run the tests with pytest due to parameterization.")

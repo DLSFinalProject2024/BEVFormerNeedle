@@ -8,7 +8,7 @@ from ..autograd import TensorTuple, TensorTupleOp
 from ..backend_selection import array_api, BACKEND
 from .ops_tuple import *
 
-class GridSample:
+class GridSample(TensorOp):
     def __init__(self, mode: str, padding_mode: str, align_corners: bool):
         self.mode = mode
         self.padding_mode = padding_mode

@@ -363,25 +363,25 @@ void GridSample(const AlignedArray& a, const AlignedArray& grid, AlignedArray* o
    * Compute grid sample
    * 
    * Args:
-   *    a: compact array of size a.size = B * C * (H+1) * (W+1)
+   *    a: compact array of size a.size = B * C * (H+2) * (W+2)
    *    grid: compact array of grid.size = B * H * W * 2
    *    out: compact array to write into. out.size = B * C * H * W
    *    shape: B, C, H, W
    */
-  auto [b, c, h, w] = shape;
+  int32_t b = shape[0], c = shape[1], h = shape[2], w = shape[3];
   scalar_t offset_x = (w + 1) / 2.0;
   scalar_t offset_y = (h + 1) / 2.0;
   int32_t xx[4] = {0, 1, 0, 1};
   int32_t yy[4] = {0, 0, 1, 1};
   int32_t hw = h * w;
-  int32_t h1w1 = (h + 1) * (w + 1);
+  int32_t h2w2 = (h + 2) * (w + 2);
   int32_t chw = c * h * w;
   int32_t bchw = b * c * h * w;
 
   for (int32_t i=0; i<bchw; ++i) {
     int32_t grid_ptr = ((i / chw) * hw + i % hw) << 1;
-    int32_t x = grid.ptr[grid_ptr];
-    int32_t y = grid.ptr[grid_ptr + 1];
+    scalar_t x = grid.ptr[grid_ptr];
+    scalar_t y = grid.ptr[grid_ptr + 1];
     scalar_t x_trans = x * w / 2.0 + offset_x;
     scalar_t y_trans = y * h / 2.0 + offset_y;
     int32_t x_ind = static_cast<int32_t>(x_trans);
@@ -389,7 +389,7 @@ void GridSample(const AlignedArray& a, const AlignedArray& grid, AlignedArray* o
     scalar_t dx = x_trans - x_ind;
     scalar_t dy = y_trans - y_ind;
     for (int k = 0; k < 4; ++k) {
-      int32_t a_ptr = (i / hw) * h1w1 + (y_ind + yy[k]) * (w+1) + (x_ind + xx[k]);
+      int32_t a_ptr = (i / hw) * h2w2 + (y_ind + yy[k]) * (w+2) + (x_ind + xx[k]);
       out->ptr[i] += a.ptr[a_ptr] * (dx * ((xx[k] << 1) - 1) + 1 - xx[k]) * (dy * ((yy[k] << 1) - 1) + 1 - yy[k]);
     }
   }

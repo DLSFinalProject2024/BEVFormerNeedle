@@ -612,7 +612,16 @@ class NDArray:
         origin = tuple(slice(pad[0], s + pad[0]) for s, pad in zip(self.shape, axes))
         out[origin] = self
         return out
-
+    
+    def grid_sample(self, grid, mode='bilinear', padding_mode='zeros', align_corners=False):
+        assert len(self.shape) == 4
+        assert len(grid.shape) == 4
+        b, c, h, w = self.shape
+        assert grid.shape == (b, h, w, 2)
+        out = NDArray.make(self.shape, device=self.device)
+        self = self.pad((0,0), (0,0), (1,1), (1,1))
+        self.device.grid_sample(self._handle, grid._handle, out._handle, (b, c, h, w))
+        return out
 
 def array(a, dtype="float32", device=None):
     """Convenience methods to match numpy a bit more closely."""

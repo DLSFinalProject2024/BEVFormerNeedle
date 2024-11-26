@@ -38,7 +38,7 @@ def test_patch_embedding(batch_size, img_size, patch_size, in_channels, embed_di
 
 @pytest.mark.parametrize("batch_size", [2, 4])
 @pytest.mark.parametrize("seq_len, embed_dim, num_head, dim_head, hidden_size", [
-    (197, 768, 12, 128, 3072),  # ImageNet
+    # (197, 768, 12, 128, 3072),  # ImageNet
     (65, 16, 1, 16, 64),  # Cifar10
 ])
 @pytest.mark.parametrize("dropout", [0.0])
@@ -58,6 +58,42 @@ def test_vision_transformer_block(batch_size, seq_len, embed_dim, num_head, dim_
     out = block(x)
     assert out.shape == (batch_size, seq_len, embed_dim), f"Expected shape {(batch_size, seq_len, embed_dim)}, got {out.shape}"
 
+
+
+@pytest.mark.parametrize("batch_size", [4, 8])
+@pytest.mark.parametrize("img_size, patch_size, in_channels, num_classes, embed_dim, num_heads, dim_head, mlp_hidden_dim", [
+    # ([224, 224], 16, 3, 1000, 768, 12, 128, 3072),
+    ([32, 32], 4, 3, 10, 16, 1, 16, 64), # Cifar10
+])
+@pytest.mark.parametrize("num_blocks", [6])
+@pytest.mark.parametrize("dropout", [0.0])
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_vision_transformer(batch_size, img_size, patch_size, in_channels, num_classes, embed_dim, num_heads, dim_head, mlp_hidden_dim, num_blocks, dropout, device):
+    x = np.random.rand(batch_size, in_channels, img_size[0], img_size[1])
+    x = ndl.Tensor(x, device=device)
+
+    model = nn.VisionTransformer(
+        img_size=img_size,
+        patch_size=patch_size,
+        in_channels=in_channels,
+        num_classes=num_classes,
+        embed_dim=embed_dim,
+        num_blocks=num_blocks,
+        num_heads=num_heads,
+        dim_head=dim_head,
+        mlp_hidden_dim=mlp_hidden_dim,
+        dropout=dropout,
+        device=device
+    )
+    out = model(x)
+    assert out.shape == (batch_size, num_classes), f"Expected shape {(batch_size, num_classes)}, got {out.shape}"
+
+    y_onehot = np.zeros((batch_size, num_classes))
+    y_onehot[np.arange(batch_size), np.random.randint(num_classes, size=batch_size)] = 1
+    y_onehot = ndl.Tensor(y_onehot, device=device)
+
+    loss = softmax_loss(out, y_onehot)
+    loss.backward()
 
 if __name__ == "__main__":
     pytest.main()

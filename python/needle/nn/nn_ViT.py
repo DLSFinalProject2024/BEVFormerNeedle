@@ -1,10 +1,16 @@
 import needle.nn as nn
 import needle.ops as ops
 from needle.autograd import Tensor
+import needle.init as init
 # import numpy as np
 
 
 class PatchEmbedding(nn.Module):
+    """
+    Patch Embedding layer.
+    Input: (batch, in_channels, img_size, img_size)
+    Output: (batch, num_patches, embed_dim)
+    """
     def __init__(self, img_size=[224, 224], patch_size=16, in_channels=3, embed_dim=768, device=None, dtype="float32"):
         super().__init__()
         assert img_size[0] % patch_size == 0 and img_size[1] % patch_size == 0, "Image dimensions must be divisible by the patch size"
@@ -80,3 +86,64 @@ class VisionTransformerBlock(nn.Module):
 
         return x
     
+
+class VisionTransformer(nn.Module):
+    """
+    Vision Transformer for image classification tasks.
+    """
+    def __init__(
+        self, img_size=[224, 224], patch_size=16, in_channels=3, num_classes=1000, embed_dim=768, num_blocks=6,
+        num_heads=12, dim_head=128, mlp_hidden_dim=3072, dropout=0.1, device=None, dtype="float32",
+    ):
+        super().__init__()
+        self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim, device, dtype)
+
+        self.num_patches = (img_size[0] // patch_size) * (img_size[1] // patch_size)  # 14 * 14 = 196
+        self.cls_token = nn.Parameter(
+            init.zeros(embed_dim, device=device, dtype=dtype, requires_grad=True)  # TODO: need grad?
+        )
+
+        # (1, 197, 768)
+        self.positional_embedding = nn.Parameter(init.zeros(1, self.num_patches + 1, embed_dim, device=device, dtype=dtype))
+        self.positional_dropout = nn.Dropout(dropout)
+
+        self.transformer_blocks = nn.Sequential(
+            *[VisionTransformerBlock(
+                embed_dim=embed_dim,
+                num_head=num_heads,
+                dim_head=dim_head,
+                hidden_size=mlp_hidden_dim,
+                dropout=dropout,
+                device=device,
+                dtype=dtype
+            ) for _ in range(num_blocks)]
+        )
+        self.head = nn.Linear(embed_dim, num_classes, device=device, dtype=dtype)
+
+    def forward(self, x):
+        """
+        Input: (batch, in_channels, img_size, img_size)
+        Output: (batch, num_classes)
+        """
+        x = self.patch_embed(x)  # (batch, num_patches, embed_dim)
+        batch_size, num_patches, embed_dim = x.shape
+
+        # Add [CLS] token
+        cls_tokens = self.cls_token.broadcast_to((batch_size, embed_dim))
+        xs = tuple(ops.split(x, axis=1))
+        x = (cls_tokens,) + xs
+        x = ops.stack(x, axis=1)  # (batch, num_patches + 1, embed_dim)
+
+        # Add positional embedding
+        x = x + self.positional_embedding.broadcast_to(x.shape)
+
+        # Transformer layers
+        x = self.transformer_blocks(x)  # (batch, num_patches + 1, embed_dim)
+
+        # Extract [CLS] token representation
+        x_cls = ops.split(x, axis=1)[0]  # (batch, embed_dim)
+
+        # Classification head
+        x = self.head(x_cls)
+
+        return x

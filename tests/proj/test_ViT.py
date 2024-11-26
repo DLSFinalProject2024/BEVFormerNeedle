@@ -35,5 +35,29 @@ def test_patch_embedding(batch_size, img_size, patch_size, in_channels, embed_di
     assert out.shape == (batch_size, num_patches, embed_dim), f"Expected shape {(batch_size, num_patches, embed_dim)}, got {out.shape}"
 
 
+
+@pytest.mark.parametrize("batch_size", [2, 4])
+@pytest.mark.parametrize("seq_len, embed_dim, num_head, dim_head, hidden_size", [
+    (197, 768, 12, 128, 3072),  # ImageNet
+    (65, 16, 1, 16, 64),  # Cifar10
+])
+@pytest.mark.parametrize("dropout", [0.0])
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_vision_transformer_block(batch_size, seq_len, embed_dim, num_head, dim_head, hidden_size, dropout, device):
+    x = np.random.rand(batch_size, seq_len, embed_dim)
+    x = ndl.Tensor(x, device=device)
+
+    block = nn.VisionTransformerBlock(
+        embed_dim=embed_dim,
+        num_head=num_head,
+        dim_head=dim_head,
+        hidden_size=hidden_size,
+        dropout=dropout,
+        device=device
+    )
+    out = block(x)
+    assert out.shape == (batch_size, seq_len, embed_dim), f"Expected shape {(batch_size, seq_len, embed_dim)}, got {out.shape}"
+
+
 if __name__ == "__main__":
     pytest.main()

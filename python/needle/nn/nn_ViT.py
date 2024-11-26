@@ -1,6 +1,5 @@
 import needle.nn as nn
 import needle.ops as ops
-from needle.nn import MultiHeadAttention
 from needle.autograd import Tensor
 # import numpy as np
 
@@ -26,3 +25,58 @@ class PatchEmbedding(nn.Module):
         x = x.permute((0, 2, 1))
         return x
         
+
+class VisionTransformerBlock(nn.Module):
+    def __init__(self, embed_dim=768, num_head=12, dim_head=128, hidden_size=3072, dropout=0., device=None, dtype="float32"):
+        super().__init__()
+
+        self.device = device
+        self.dtype = dtype
+
+        self.embed_dim = embed_dim
+        self.num_head = num_head
+        self.dim_head = dim_head
+        self.hidden_size = hidden_size
+        
+        self.layer1 = nn.Sequential(
+            nn.AttentionLayer(
+                q_features=embed_dim,
+                num_head=num_head,
+                dim_head=dim_head,
+                out_features=embed_dim,
+                dropout=dropout,
+                causal=False,
+                device=device, 
+                dtype=dtype
+            ),
+            nn.Dropout(dropout),
+        )
+
+        self.layernorm1d = nn.LayerNorm1d(embed_dim, device=device, dtype=dtype)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim, hidden_size, device=device, dtype=dtype),
+            nn.ReLU(),  # Note: Could be changed to GELU
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, embed_dim, device=device, dtype=dtype),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x):
+        batch_size, seq_len, x_dim = x.shape
+
+        _x = x
+        x = x.reshape((batch_size * seq_len, x_dim))
+        x = self.layernorm1d(x)
+        x = x.reshape((batch_size, seq_len, x_dim))
+        x = self.layer1(x) + x
+
+        _x = x
+        x = x.reshape((batch_size * seq_len, x_dim))
+        x = self.layernorm1d(x)
+        x = x.reshape((batch_size, seq_len, x_dim))
+        x = self.mlp(x)
+        x += _x
+
+        return x
+    

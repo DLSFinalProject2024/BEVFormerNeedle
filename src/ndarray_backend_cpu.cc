@@ -363,18 +363,17 @@ void GridSample(const AlignedArray& a, const AlignedArray& grid, AlignedArray* o
    * Compute grid sample
    * 
    * Args:
-   *    a: compact array of size a.size = B * C * (H+2) * (W+2)
+   *    a: A flattened image. Compact array of size a.size = B * C * H * W
    *    grid: compact array of grid.size = B * H * W * 2
    *    out: compact array to write into. out.size = B * C * H * W
    *    shape: B, C, H, W
    */
   int32_t b = shape[0], c = shape[1], h = shape[2], w = shape[3];
-  scalar_t offset_x = (w + 1) / 2.0;
-  scalar_t offset_y = (h + 1) / 2.0;
+  scalar_t offset_x = (w - 1) / 2.0;
+  scalar_t offset_y = (h - 1) / 2.0;
   int32_t xx[4] = {0, 1, 0, 1};
   int32_t yy[4] = {0, 0, 1, 1};
   int32_t hw = h * w;
-  int32_t h2w2 = (h + 2) * (w + 2);
   int32_t chw = c * h * w;
   int32_t bchw = b * c * h * w;
 
@@ -384,13 +383,58 @@ void GridSample(const AlignedArray& a, const AlignedArray& grid, AlignedArray* o
     scalar_t y = grid.ptr[grid_ptr + 1];
     scalar_t x_trans = x * w / 2.0 + offset_x;
     scalar_t y_trans = y * h / 2.0 + offset_y;
-    int32_t x_ind = static_cast<int32_t>(x_trans);
-    int32_t y_ind = static_cast<int32_t>(y_trans);
+    int32_t x_ind = floor(x_trans);
+    int32_t y_ind = floor(y_trans);
     scalar_t dx = x_trans - x_ind;
     scalar_t dy = y_trans - y_ind;
     for (int k = 0; k < 4; ++k) {
-      int32_t a_ptr = (i / hw) * h2w2 + (y_ind + yy[k]) * (w+2) + (x_ind + xx[k]);
+      if (y_ind + yy[k] < 0 || y_ind + yy[k] >= h || x_ind + xx[k] < 0 || x_ind + xx[k] >= w) continue;
+      int32_t a_ptr = i - i % hw + (y_ind + yy[k]) * w + (x_ind + xx[k]);
       out->ptr[i] += a.ptr[a_ptr] * (dx * ((xx[k] << 1) - 1) + 1 - xx[k]) * (dy * ((yy[k] << 1) - 1) + 1 - yy[k]);
+    }
+  }
+}
+ 
+void GridSampleBackward(const AlignedArray& out_grad, const AlignedArray& a, const AlignedArray& grid,
+                        AlignedArray* a_grad, AlignedArray* grid_grad, std::vector<int32_t> shape) {
+  /**
+   * Compute grid sample
+   * 
+   * Args:
+   *    out_grad: compact array of size = B * C * H * W
+   *    a: A flattened image. Compact array of size a.size = B * C * H * W
+   *    grid: compact array of grid.size = B * H * W * 2
+   *    a_grid: compact array of a_grid.size = B * C * H * W
+   *    grid_grid: compact array of grid_grad.size = B * H * W * 2
+   *    shape: B, C, H, W
+   */
+  int32_t b = shape[0], c = shape[1], h = shape[2], w = shape[3];
+  scalar_t offset_x = (w - 1) / 2.0;
+  scalar_t offset_y = (h - 1) / 2.0;
+  int32_t xx[4] = {0, 1, 0, 1};
+  int32_t yy[4] = {0, 0, 1, 1};
+  int32_t hw = h * w;
+  int32_t chw = c * h * w;
+  int32_t bchw = b * c * h * w;
+
+  for (int32_t i=0; i<bchw; ++i) {
+    int32_t grid_ptr = ((i / chw) * hw + i % hw) << 1;
+    scalar_t x = grid.ptr[grid_ptr];
+    scalar_t y = grid.ptr[grid_ptr + 1];
+    scalar_t x_trans = x * w / 2.0 + offset_x;
+    scalar_t y_trans = y * h / 2.0 + offset_y;
+    int32_t x_ind = floor(x_trans);
+    int32_t y_ind = floor(y_trans);
+    scalar_t dx = x_trans - x_ind;
+    scalar_t dy = y_trans - y_ind;
+    for (int k = 0; k < 4; ++k) {
+      if (y_ind + yy[k] < 0 || y_ind + yy[k] >= h || x_ind + xx[k] < 0 || x_ind + xx[k] >= w) continue;
+      scalar_t frac_x = dx * ((xx[k] << 1) - 1) + 1 - xx[k];
+      scalar_t frac_y = dy * ((yy[k] << 1) - 1) + 1 - yy[k];
+      int32_t a_ptr = i - i % hw + (y_ind + yy[k]) * w + (x_ind + xx[k]);
+      grid_grad->ptr[grid_ptr] += out_grad.ptr[i] * a.ptr[a_ptr] * (w / 2.0) * ((xx[k] << 1) - 1) * frac_y;
+      grid_grad->ptr[grid_ptr + 1] += out_grad.ptr[i] * a.ptr[a_ptr] * (h / 2.0) * ((yy[k] << 1) - 1) * frac_x;
+      a_grad->ptr[a_ptr] += out_grad.ptr[i] * frac_x * frac_y;
     }
   }
 }
@@ -456,4 +500,5 @@ PYBIND11_MODULE(ndarray_backend_cpu, m) {
   m.def("reduce_max", ReduceMax);
   m.def("reduce_sum", ReduceSum);
   m.def("grid_sample", GridSample);
+  m.def("grid_sample_backward", GridSampleBackward);
 }

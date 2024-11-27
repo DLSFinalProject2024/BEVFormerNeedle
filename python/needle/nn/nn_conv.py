@@ -16,7 +16,7 @@ class Conv(Module):
     No grouped convolution or dilation
     Only supports square kernels
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, bias=True, device=None, dtype="float32"):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=None, bias=True, device=None, dtype="float32"):
         super().__init__()
         if isinstance(kernel_size, tuple):
             kernel_size = kernel_size[0]
@@ -26,7 +26,10 @@ class Conv(Module):
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.stride = stride
-        self.padding = (kernel_size - 1) // 2
+        if padding is not None:
+            self.padding = padding
+        else:
+            self.padding = (kernel_size - 1) // 2
 
         # Initialize weights
         fan_in = in_channels * kernel_size * kernel_size

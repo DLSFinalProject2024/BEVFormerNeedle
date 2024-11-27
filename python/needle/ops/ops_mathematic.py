@@ -511,13 +511,13 @@ class Conv(TensorOp):
         assert len(A.shape) == 4, "Input tensor A must have 4 dimensions"
         assert len(B.shape) == 4, "Input tensor B (Kernel) must have 4 dimensions"
 
-        A = A.pad(((0, 0), (self.padding, self.padding), (self.padding, self.padding), (0, 0))).compact()
-
         N, H, W, C_in = A.shape
         K, _, _, C_out = B.shape
+        
+        A = A.pad(((0, 0), (self.padding, self.padding), (self.padding, self.padding), (0, 0))).compact()
         Ns, Hs, Ws, Cs = A.strides
-        new_H = (H-K+1 + self.stride-1) // self.stride
-        new_W = (W-K+1 + self.stride-1) // self.stride
+        new_H = (H-K + 2*self.padding) // self.stride + 1
+        new_W = (W-K + 2*self.padding) // self.stride + 1
         
         inner_dim = K * K * C_in
         A_shape = (N, new_H, new_W, K, K, C_in)
@@ -539,6 +539,7 @@ class Conv(TensorOp):
         # A.grad
         _B = permute(B, (0, 1, 3, 2))
         _B = flip(_B, axes=(0, 1))
+        # breakpoint()
         A_grad = conv(out_grad, _B, stride=1, padding=(K - 1 - self.padding))
 
         # B.grad
@@ -547,6 +548,8 @@ class Conv(TensorOp):
         B_grad = conv(_A, out_grad, stride=1, padding=self.padding)
         B_grad = permute(B_grad, (1, 2, 0, 3))
 
+        assert A_grad.shape == A.shape, f"Expected A_grad shape {A.shape}, got {A_grad.shape}"
+        assert B_grad.shape == B.shape, f"Expected B_grad shape {B.shape}, got {B_grad.shape}"
         return A_grad, B_grad
 
 def conv(a, b, stride=1, padding=1):

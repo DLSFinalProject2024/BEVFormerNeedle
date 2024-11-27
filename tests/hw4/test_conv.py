@@ -413,6 +413,9 @@ op_conv_shapes = [
     ( (3, 17, 17, 16), (5, 5, 16, 1),  1, 0 ),
     ( (3, 17, 17, 16), (1, 1, 16, 1),  1, 0 ),
     ( (1, 14, 14, 2), (3, 3, 2, 2),    1, 0 ),
+
+    ( (3, 32, 32, 3), (4, 4, 3, 16), 1, 0 ),
+    ( (3, 32, 32, 3), (4, 4, 3, 16), 4, 0 ),
 ]
 @pytest.mark.parametrize("Z_shape, W_shape, stride, padding", op_conv_shapes)
 @pytest.mark.parametrize("device", _DEVICES)

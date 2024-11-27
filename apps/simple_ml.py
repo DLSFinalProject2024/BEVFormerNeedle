@@ -14,7 +14,7 @@ import needle.nn as nn
 from apps.models import *
 from needle.data import DataLoader, CIFAR10Dataset
 import time
-device = ndl.cpu()
+device = ndl.cpu() if not ndl.cuda().enabled() else ndl.cuda()
 
 def parse_mnist(image_filename, label_filename):
     """Read an images and labels file in MNIST format.  See this page:
@@ -176,7 +176,7 @@ def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None)
     avg_loss = total_loss / len(dataloader.dataset)
     avg_acc = correct / len(dataloader.dataset)
 
-    return avg_acc, avg_loss
+    return avg_acc.item(), avg_loss.item()
 
 
 

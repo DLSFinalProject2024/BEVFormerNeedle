@@ -37,9 +37,10 @@ class PatchEmbedding(nn.Module):
                 patches.append(ops.stack(cur, axis=3))
         
         x = ops.stack(patches, axis=1)  # (batch, num_patches, in_channels, patch_size, patch_size)
-        x = x.reshape((B, self.num_patches, C * self.patch_size * self.patch_size))
+        x = x.reshape((B * self.num_patches, C * self.patch_size * self.patch_size))
         # (batch, num_patches, in_channels * patch_size * patch_size) -> (batch, num_patches, embed_dim)
         x = self.linear(x)
+        x = x.reshape((B, self.num_patches, self.embed_dim))
 
 
         # Old failed implementation: Conv has issue in out settings

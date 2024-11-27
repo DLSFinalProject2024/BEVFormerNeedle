@@ -17,7 +17,7 @@ if __name__ == "__main__":
     test_dataset = CIFAR10Dataset(base_folder="./data/cifar-10-batches-py", train=False)
 
     # Create DataLoader instances
-    batch_size = 32
+    batch_size = 128
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 

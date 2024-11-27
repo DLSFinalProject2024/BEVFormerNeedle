@@ -3,6 +3,7 @@
 import struct
 import gzip
 import numpy as np
+from tqdm import tqdm
 
 import sys
 
@@ -11,6 +12,7 @@ import needle as ndl
 
 import needle.nn as nn
 from apps.models import *
+from needle.data import DataLoader, CIFAR10Dataset
 import time
 device = ndl.cpu()
 
@@ -146,9 +148,36 @@ def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None)
         avg_loss: average loss over dataset
     """
     np.random.seed(4)
-    ### BEGIN YOUR SOLUTION
-    raise NotImplementedError()
-    ### END YOUR SOLUTION
+    
+    model.eval() if opt is None else model.train()
+
+    total_loss = 0
+    correct = 0
+
+    for batch_data, batch_labels in tqdm(dataloader):
+        batch_data = ndl.Tensor(batch_data, device=device)
+        batch_labels = ndl.Tensor(batch_labels, device=device)
+        
+        batch_size = batch_data.shape[0]
+        if model.training:
+            opt.reset_grad()
+
+        logits = model(batch_data)
+        loss = loss_fn(logits, batch_labels)
+
+        if model.training:
+            loss.backward()
+            opt.step()
+
+        # Compute metrics
+        total_loss += loss.numpy() * batch_size
+        correct += (logits.numpy().argmax(axis=1) == batch_labels.numpy()).sum()
+
+    avg_loss = total_loss / len(dataloader.dataset)
+    avg_acc = correct / len(dataloader.dataset)
+
+    return avg_acc, avg_loss
+
 
 
 def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
@@ -170,9 +199,14 @@ def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
         avg_loss: average loss over dataset from last epoch of training
     """
     np.random.seed(4)
-    ### BEGIN YOUR SOLUTION
-    raise NotImplementedError()
-    ### END YOUR SOLUTION
+    
+    opt = optimizer(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    for epoch in range(n_epochs):
+        avg_acc, avg_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn(), opt=opt)
+        print(f"Epoch {epoch+1}: avg_acc={avg_acc:.3f}, avg_loss={avg_loss:.3f}")
+
+    return avg_acc, avg_loss
 
 
 def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
@@ -189,9 +223,9 @@ def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
         avg_loss: average loss over dataset
     """
     np.random.seed(4)
-    ### BEGIN YOUR SOLUTION
-    raise NotImplementedError()
-    ### END YOUR SOLUTION
+    
+    avg_acc, avg_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn(), opt=None)
+    return avg_acc, avg_loss
 
 
 ### PTB training ###

@@ -54,9 +54,7 @@ class DataLoader:
         self.dataset = dataset
         self.shuffle = shuffle
         self.batch_size = batch_size
-        if not self.shuffle:
-            self.ordering = np.array_split(np.arange(len(dataset)), 
-                                           range(batch_size, len(dataset), batch_size))
+        self.ordering = np.array_split(np.arange(len(dataset)), range(batch_size, len(dataset), batch_size))
 
         self.current_batch_idx = 0
 
@@ -80,3 +78,6 @@ class DataLoader:
         
         # Return the actual data corresponding to the batch indices
         return [Tensor(data) for data in datas]
+    
+    def __len__(self):
+        return len(self.ordering)

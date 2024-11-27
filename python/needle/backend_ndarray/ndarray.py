@@ -516,7 +516,7 @@ class NDArray:
         if hasattr(self.device, "matmul_tiled") and all(
             d % self.device.__tile_size__ == 0 for d in (m, n, p)
         ):
-            print("Using tiled matrix multiplication")
+            # print("Using tiled matrix multiplication")
 
             def tile(a, tile):
                 return a.as_strided(

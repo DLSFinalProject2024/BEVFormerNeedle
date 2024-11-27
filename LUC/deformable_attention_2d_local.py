@@ -160,7 +160,7 @@ class DeformableAttention2DLocal(nn.Module):
         self.to_v = nn.Conv2d(dim, inner_dim, 1, groups = offset_groups if group_key_values else 1, bias = conv_qkv_bias)
         self.to_out = nn.Conv2d(inner_dim, dim, 1)
 
-    def forward(self, x, return_vgrid=False, return_offsets=False, return_norm_vgrid=False):
+    def forward(self, x, return_vgrid=False, return_offsets=False, return_norm_vgrid=False, return_kv_feat=False, return_pos_encoding=False):
         """
         b - batch
         h - heads
@@ -174,8 +174,10 @@ class DeformableAttention2DLocal(nn.Module):
 
         # queries
 
+        #test
         orig_x = x
         q = self.to_q(x)
+        #test
         orig_q = q
 
         # calculate offsets - offset MLP shared across all groups
@@ -183,6 +185,7 @@ class DeformableAttention2DLocal(nn.Module):
         group = lambda t: rearrange(t, 'b (g d) ... -> (b g) d ...', g = self.offset_groups)
 
         grouped_queries = group(q)
+        #test
         offsets_test = self.to_offsets_test(grouped_queries)
         offsets = self.to_offsets(grouped_queries)
 
@@ -198,6 +201,9 @@ class DeformableAttention2DLocal(nn.Module):
             vgrid_scaled,
         mode = 'bilinear', padding_mode = 'zeros', align_corners = False)
 
+        #test
+        kv_feat_orig = kv_feats
+
         kv_feats = rearrange(kv_feats, '(b g) d ... -> b (g d) ...', b = b)
 
         # derive key / values
@@ -212,14 +218,23 @@ class DeformableAttention2DLocal(nn.Module):
 
         q, k, v = map(lambda t: rearrange(t, 'b (h d) ... -> b h (...) d', h = heads), (q, k, v))
 
+        #test
+        k_test, v_test, q_test = k, v, q
+
         # query / key similarity
 
         sim = einsum('b h i d, b h j d -> b h i j', q, k)
+        #test
+        sim_test = sim
 
         # relative positional bias
 
         grid = create_grid_like(x)
         grid_scaled = normalize_grid(grid, dim = 0)
+        #test
+        grid_x = grid
+        grid_x_scaled = grid_scaled
+
         rel_pos_bias = self.rel_pos_bias(grid_scaled, vgrid_scaled)
         sim = sim + rel_pos_bias
 
@@ -237,6 +252,12 @@ class DeformableAttention2DLocal(nn.Module):
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
         out = self.to_out(out)
+
+        if return_pos_encoding:
+            return kv_feat_orig, vgrid_scaled, grid_x, grid_x_scaled
+
+        if return_kv_feat:
+            return kv_feat_orig, kv_feats, k_test, v_test, q_test, sim_test
 
         if return_norm_vgrid:
             return offsets, vgrid_scaled

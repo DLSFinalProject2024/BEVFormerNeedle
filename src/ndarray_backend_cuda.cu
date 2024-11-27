@@ -451,6 +451,32 @@ void EwiseTanh(const CudaArray& a, CudaArray* out) {
   EwiseTanhKernel<<<dim.grid, dim.block>>>(a.ptr, out->ptr, out->size);
 }
 
+__global__ void EwiseAbsKernel(const scalar_t* a, scalar_t* out, size_t size) {
+  // Calculate the global index of the thread.
+  size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (gid < size) out[gid] = abs(a[gid]);
+}
+
+void EwiseAbs(const CudaArray& a, CudaArray* out) {
+  CudaDims dim = CudaOneDim(out->size);
+  EwiseAbsKernel<<<dim.grid, dim.block>>>(a.ptr, out->ptr, out->size);
+}
+
+__global__ void EwiseSignKernel(const scalar_t* a, scalar_t* out, size_t size) {
+  // Calculate the global index of the thread.
+  size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (gid < size){ 
+    out[gid] = a[gid] > 0 ? 1.0  : 
+               a[gid] < 0 ? -1.0 :
+               0.0;
+  }
+}
+
+void EwiseSign(const CudaArray& a, CudaArray* out) {
+  CudaDims dim = CudaOneDim(out->size);
+  EwiseSignKernel<<<dim.grid, dim.block>>>(a.ptr, out->ptr, out->size);
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Elementwise and scalar operations
@@ -669,6 +695,8 @@ PYBIND11_MODULE(ndarray_backend_cuda, m) {
   m.def("ewise_log", EwiseLog);
   m.def("ewise_exp", EwiseExp);
   m.def("ewise_tanh", EwiseTanh);
+  m.def("ewise_sign", EwiseSign);
+  m.def("ewise_abs", EwiseAbs);
 
   m.def("matmul", Matmul);
 

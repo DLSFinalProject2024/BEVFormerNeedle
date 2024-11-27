@@ -676,4 +676,35 @@ class Conv(TensorOp):
 def conv(a, b, stride=1, padding=1):
     return Conv(stride, padding)(a, b)
 
+class Sign(TensorOp):
+    def compute(self, a):
+        ### BEGIN YOUR SOLUTION
+        return array_api.sign(a)
+        ### END YOUR SOLUTION
+
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        grad_a = init.zeros_like(out_grad, device=out_grad.device, requires_grad=True)
+        return grad_a
+        ### END YOUR SOLUTION
+
+def sign(a):
+    return Sign()(a)
+
+class Abs(TensorOp):
+    def compute(self, a):
+        ### BEGIN YOUR SOLUTION
+        return array_api.abs(a)
+        ### END YOUR SOLUTION
+
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        a = node.inputs[0]
+        grad_a = multiply(out_grad, sign(a))  # Use element-wise sign operation to compute the gradient
+        return grad_a        
+        ### END YOUR SOLUTION
+
+def abs(a):
+    return Abs()(a)
+
 

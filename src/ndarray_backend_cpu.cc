@@ -19,6 +19,11 @@ void printArray(const std::vector<int> &in, const std::string name);
 std::ostream & operator << (std::ostream &out, const std::vector<int> &in);
 std::ostream & operator << (std::ostream &out, const std::vector<long unsigned int> &in);
 
+template <typename T>
+int sign(T x) {
+    return (x > 0) - (x < 0);
+}
+
 /**
  * This is a utility structure for maintaining an array aligned to ALIGNMENT boundaries in
  * memory.  This alignment should be at least TILE * ELEM_SIZE, though we make it even larger
@@ -318,6 +323,18 @@ void EwiseTanh(const AlignedArray &a, AlignedArray *out){
   }
 }
 
+void EwiseSign(const AlignedArray &a, AlignedArray *out){
+  for (size_t i = 0; i < a.size; i++){
+    out->ptr[i] = sign(a.ptr[i]);
+  }
+}
+
+void EwiseAbs(const AlignedArray &a, AlignedArray *out){
+  for (size_t i = 0; i < a.size; i++){
+    out->ptr[i] = std::abs(a.ptr[i]);
+  }
+}
+
 void Matmul(const AlignedArray& a, const AlignedArray& b, AlignedArray* out, uint32_t m, uint32_t n,
             uint32_t p) {
   /**
@@ -564,6 +581,8 @@ PYBIND11_MODULE(ndarray_backend_cpu, m) {
   m.def("ewise_log", EwiseLog);
   m.def("ewise_exp", EwiseExp);
   m.def("ewise_tanh", EwiseTanh);
+  m.def("ewise_sign", EwiseSign);
+  m.def("ewise_abs", EwiseAbs);
 
   m.def("matmul", Matmul);
   m.def("matmul_tiled", MatmulTiled);

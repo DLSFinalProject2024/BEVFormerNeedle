@@ -33,12 +33,11 @@ def divisible_by(numer, denom):
 def create_grid_like(t, dim = 0):
     b, c, h, w = t.shape
     device = t.device  # Get the device of the input tensor
-    assert c == 2
 
     # Create the grid using NumPy
     grid = np.stack(np.meshgrid(np.arange(w), np.arange(h), indexing='xy'), axis=dim)
-    grid = np.reshape(grid, (1, c, h, w))
-    grid = np.broadcast_to(grid, (b, c, h, w))
+    #grid = np.reshape(grid, (1, 2, h, w))
+    #grid = np.broadcast_to(grid, (b, 2, h, w))
 
     # Convert to PyTorch tensor and move to the same device and dtype as `t`
     grid_tensor = Tensor(grid, device=device, dtype=t.dtype, requires_grad=False)
@@ -46,7 +45,7 @@ def create_grid_like(t, dim = 0):
 
 def normalize_grid(grid, dim = 1, out_dim = -1):
     # normalizes a grid to range from -1 to 1
-    b, c, h, w = grid.shape
+    h, w = grid.shape[-2:]
     device, dtype = grid.device, grid.dtype
 
     grid_h, grid_w = ops.split(grid, axis = dim)
@@ -103,6 +102,9 @@ class DeformableAttention(Module):
 
         super().__init__()
 
+        # For testing
+        self.kv_feats_from_luc = None
+
         self.device = device
         self.dtype = dtype
 
@@ -119,6 +121,7 @@ class DeformableAttention(Module):
         self.inner_dim = dim_head * heads
         self.scale = dim_head ** -0.5
         self.heads = heads
+        self.dim_head = dim_head
         self.offset_groups = offset_groups
 
         self.offset_dims = self.inner_dim // offset_groups
@@ -144,6 +147,26 @@ class DeformableAttention(Module):
         self.to_k = ConvGp(self.dim, self.inner_dim, 1, groups = offset_groups if group_key_values else 1, bias = self.to_k_bias, device=self.device, dtype=self.dtype)
         self.to_v = ConvGp(self.dim, self.inner_dim, 1, groups = offset_groups if group_key_values else 1, bias = self.to_v_bias, device=self.device, dtype=self.dtype)
         self.to_out = ConvGp(self.inner_dim, self.dim, 1, bias=self.to_out_bias, device=self.device, dtype=self.dtype)
+
+    def matmul(self, a, b_transpose):
+        """
+        batched matrix multiplication;
+        """
+        a_shape = (*a.shape[:-1], 1, *a.shape[-1:])
+        a = a.reshape(a_shape)
+
+        b_transpose_shape = (*b_transpose.shape[:-2], 1, *b_transpose.shape[-2:])
+        b_transpose = b_transpose.reshape(b_transpose_shape)
+
+        broadcast_shape = list(a_shape)
+        broadcast_shape[-2] = b_transpose_shape[-2]
+        a = a.broadcast_to(broadcast_shape)
+
+        broadcast_shape = list(b_transpose_shape)
+        broadcast_shape[-3] = a_shape[-3]
+        b_transpose = b_transpose.broadcast_to(broadcast_shape)
+
+        return (a * b_transpose).sum(len(a.shape) - 1)
 
     def softmax(self, logit):
         """
@@ -171,7 +194,9 @@ class DeformableAttention(Module):
         self,
         x,
         return_vgrid=False,
-        return_norm_vgrid=False
+        return_norm_vgrid=False,
+        return_kv_feat=False,
+        return_pos_encoding=False
     ):
         """
         The forward function of the Deformable Attention function.
@@ -179,21 +204,58 @@ class DeformableAttention(Module):
         Output: z with shape (batch_size, in_channels, height, width), NCHW
         """
 
-        heads, Bin, Cin, Hin, Win, downsample_factor, device = self.heads, *x.shape, self.downsample_factor, x.device
+        Bin, Cin, Hin, Win, downsample_factor, device = *x.shape, self.downsample_factor, x.device
 
         # queries
-        q = self.to_q(x)
+        q = self.to_q(x) #(Bin, Cin, Hin, Win)
         _, _, h_q, w_q = q.shape
 
         # reshape queries into groups
-        grouped_queries = q.reshape((Bin*self.offset_groups, self.offset_dims, h_q, w_q))
+        grouped_queries = q.reshape((Bin*self.offset_groups, self.offset_dims, h_q, w_q)) #(Bin*self.offset_groups, self.offset_dims, Hin, Win)
 
         # pass groups of queries into offset network
-        offsets = self.to_offsets(grouped_queries)
+        offsets = self.to_offsets(grouped_queries) #(Bin*self.offset_groups, 2, Hin/downsample_factor, Win/downsample_factor)
 
-        grid = create_grid_like(offsets)
-        vgrid = grid+offsets
-        vgrid_scaled = normalize_grid(vgrid, dim=1, out_dim=3)
+        grid = create_grid_like(offsets) #(2, Hin/downsample_factor, Win/downsample_factor)
+        grid = ops.reshape(grid, (1, grid.shape[0], grid.shape[1], grid.shape[2]))#(1, 2, Hin/downsample_factor, Win/downsample_factor)
+        grid = ops.broadcast_to(grid, (offsets.shape[0], grid.shape[1], grid.shape[2], grid.shape[3]))#(Bin*self.offset_groups, 2, Hin/downsample_factor, Win/downsample_factor)
+        vgrid = grid+offsets #(Bin*self.offset_groups, 2, Hin/downsample_factor, Win/downsample_factor)
+        vgrid_scaled = normalize_grid(vgrid, dim=1, out_dim=3) #(Bin*self.offset_groups, Hin/downsample_factor, Win/downsample_factor, 2)
+
+        # sampling features
+        if self.kv_feats_from_luc is not None:
+            kv_feat = self.kv_feats_from_luc.reshape((Bin, self.offset_groups*self.offset_dims, offsets.shape[-2], offsets.shape[-1])) #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
+            k, v = self.to_k(kv_feat), self.to_v(kv_feat) #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
+            q = q*self.scale #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
+
+            #Q
+            q_bin, q_cin, q_hin, q_win = q.shape
+            q = q.reshape((Bin, self.heads, self.dim_head, q_hin*q_win))
+            q = q.transpose((2, 3)) #(Bin, self.heads, Win/down_sample_factor*Hin/downsample_factor, self.dim_head)
+
+            #K
+            k_bin, k_cin, k_hin, k_win = k.shape
+            k = k.reshape((Bin, self.heads, self.dim_head, k_hin*k_win))
+            k = k.transpose((2, 3)) #(Bin, self.heads, Win/down_sample_factor*Hin/downsample_factor, self.dim_head)
+
+            #V
+            v_bin, v_cin, v_hin, v_win = v.shape
+            v = v.reshape((Bin, self.heads, self.dim_head, v_hin*v_win))
+            v = v.transpose((2, 3)) #(Bin, self.heads, Win/down_sample_factor*Hin/downsample_factor, self.dim_head)
+        
+            # similarity
+            sim = self.matmul(q, k)
+
+            # calculate relative positional encoding
+            grid_x = create_grid_like(x) #(2, Hin, Win)
+            grid_x_scaled = normalize_grid(grid_x, dim=0, out_dim=2) #(Hin, Win, 2)
+
+
+        if return_pos_encoding:
+            return vgrid_scaled, grid_x, grid_x_scaled
+
+        if return_kv_feat:
+            return kv_feat, k, v, q, sim
 
         if return_norm_vgrid:
             return q, grouped_queries, offsets, vgrid_scaled

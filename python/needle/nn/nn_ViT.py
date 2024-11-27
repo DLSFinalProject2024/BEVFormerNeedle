@@ -18,17 +18,39 @@ class PatchEmbedding(nn.Module):
         self.embed_dim = embed_dim
         self.patch_size = patch_size
         self.num_patches = (img_size[0] // patch_size) * (img_size[1] // patch_size)  # 14 * 14 = 196
-        self.proj = nn.Conv(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size, device=device, dtype=dtype)
+        # self.proj = nn.Conv(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size, padding=0, device=device, dtype=dtype)
+        self.linear = nn.Linear(in_channels * patch_size * patch_size, embed_dim, device=device, dtype=dtype)
 
     def forward(self, x):
-        # (batch, in_channels, img_size, img_size) -> (batch, embed_dim, sqrt(num_patches), sqrt(num_patches))
-        x = self.proj(x)
+        B, C, H, W = x.shape
+        cut_col = []
+        x_list = list(ops.split(x, axis=2))
+        for i in range(H // self.patch_size):
+            cur = x_list[i*self.patch_size: (i+1)*self.patch_size]
+            cut_col.append(ops.stack(cur, axis=2))
+            
+        patches = []  # (batch, in_channels, patch_size, patch_size) * num_patches
+        for xx in cut_col:
+            xx_list = list(ops.split(xx, axis=3))
+            for i in range(W // self.patch_size):
+                cur = xx_list[i*self.patch_size: (i+1)*self.patch_size]
+                patches.append(ops.stack(cur, axis=3))
+        
+        x = ops.stack(patches, axis=1)  # (batch, num_patches, in_channels, patch_size, patch_size)
+        x = x.reshape((B, self.num_patches, C * self.patch_size * self.patch_size))
+        # (batch, num_patches, in_channels * patch_size * patch_size) -> (batch, num_patches, embed_dim)
+        x = self.linear(x)
 
-        # (batch, embed_dim, sqrt(num_patches), sqrt(num_patches)) -> (batch, embed_dim, num_patches)
-        x = x.reshape((x.shape[0], self.embed_dim, self.num_patches))
 
-        # (batch, embed_dim, num_patches) -> (batch, num_patches, embed_dim)
-        x = x.permute((0, 2, 1))
+        # Old failed implementation: Conv has issue in out settings
+        # # (batch, in_channels, img_size, img_size) -> (batch, embed_dim, sqrt(num_patches), sqrt(num_patches))
+        # x = self.proj(x)
+
+        # # (batch, embed_dim, sqrt(num_patches), sqrt(num_patches)) -> (batch, embed_dim, num_patches)
+        # x = x.reshape((x.shape[0], self.embed_dim, self.num_patches))
+
+        # # (batch, embed_dim, num_patches) -> (batch, num_patches, embed_dim)
+        # x = x.permute((0, 2, 1))
         return x
         
 
@@ -100,7 +122,7 @@ class VisionTransformer(nn.Module):
 
         self.num_patches = (img_size[0] // patch_size) * (img_size[1] // patch_size)  # 14 * 14 = 196
         self.cls_token = nn.Parameter(
-            init.zeros(embed_dim, device=device, dtype=dtype, requires_grad=True)  # TODO: need grad?
+            init.zeros(1, embed_dim, device=device, dtype=dtype, requires_grad=True)  # TODO: need grad?
         )
 
         # (1, 197, 768)

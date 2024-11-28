@@ -73,7 +73,70 @@ class GELU(Module):
         tanh_z = ops.tanh(z_scaled)  # Tanh(sqrt(2/pi)*(x+0.044715*x^3))
         w = ops.add_scalar(tanh_z, 1)
         gelu = ops.mul_scalar(ops.multiply(X, w), 0.5)  # GELU(x) = 0.5 * x * (1 + tanh(...))
-        return gelu        
+        return gelu
+
+def MLPBlock(dim, device=None, dtype='float32'):
+    ### BEGIN YOUR SOLUTION
+    two_layer_linear = Sequential(Linear(in_features=dim, out_features=dim, device=device, dtype=dtype), 
+                                  ReLU()
+                                 ) 
+
+    return two_layer_linear
+    
+class CPB(Module):
+    """ https://arxiv.org/abs/2111.09883v1 """
+
+    def __init__(self, dim, *, heads, offset_groups, depth, device=None, dtype='float32'):
+        super().__init__()
+        self.device = device
+        self.dtype=dtype
+        self.heads = heads
+        self.offset_groups = offset_groups
+
+        #test
+        #self.pre_module = Sequential(Linear(in_features=2, out_features=heads//offset_groups, device=device, dtype=dtype))
+                                     #ReLU())
+        self.pre_module = Sequential(Linear(in_features=2, out_features=dim, device=device, dtype=dtype),
+                                     ReLU())
+        self.mlp_block = []
+        for i in range(depth-1):
+            self.mlp_block.append(MLPBlock(dim=dim, device=device, dtype=dtype))
+
+        self.post_module = Linear(in_features=dim, out_features=heads//offset_groups, device=device, dtype=dtype)
+        #self.post_module = Linear(in_features=2, out_features=4, bias=False, device=device, dtype=dtype)
+
+        self.cpb_block = Sequential(self.pre_module,
+                                    *self.mlp_block,
+                                    self.post_module)
+
+    def forward(self, grid_q, grid_kv):
+        device, dtype = grid_q.device, grid_kv.dtype
+        gdq_h, gdq_w, gdq_c = grid_q.shape
+        gdk_b, gdk_h, gdk_w, gdk_c = grid_kv.shape
+        gdk_bin = gdk_b//self.offset_groups
+        i_ = gdq_w*gdq_h
+        j_ = gdk_w*gdk_h
+
+        grid_q = ops.reshape(grid_q, (1, i_, gdq_c))
+        grid_q = ops.broadcast_to(grid_q, (gdk_b, i_, gdq_c)) #(b, i, c)
+        grid_kv = ops.reshape(grid_kv, (gdk_b, j_, gdk_c)) #(b, j, c)
+
+        pos1 = ops.reshape(grid_q, (gdk_b, i_, 1, gdq_c)) #(b, i, 1, c)
+        pos2 = ops.reshape(grid_kv, (gdk_b, 1, j_, gdk_c)) #(b, 1, j, c)
+
+        pos1_broad = ops.broadcast_to(pos1, (gdk_b, i_, j_, gdq_c)) #(b, i, j, c)
+        pos2_broad = ops.broadcast_to(pos2, (gdk_b, i_, j_, gdk_c)) #(b, i, j, c)
+        pos = pos1_broad - pos2_broad
+        bias = ops.sign(pos) * (ops.log(ops.abs(pos) + init.ones_like(pos, device=self.device, requires_grad=False))) #(b, i, j, c)
+        bias_to_forw = ops.reshape(bias, (bias.shape[0]*bias.shape[1]*bias.shape[2], bias.shape[3])) #(b*i*j, c)
+        bias_from_forw = self.cpb_block(bias_to_forw) #(b*i*j, o)
+        bias_res = ops.reshape(bias_from_forw, (gdk_b, i_, j_, bias_from_forw.shape[1])) #(b, i, j, o)
+
+        bias_forw = bias_res.transpose((2, 3)) #(b, i, o, j)
+        bias_forw = bias_forw.transpose((1, 2)) #(b, o, i, j)
+        bias_forw_resh = ops.reshape(bias_forw, (gdk_bin, self.offset_groups*bias_forw.shape[1], bias_forw.shape[2], bias_forw.shape[3])) #(bin, g*o, i, j)
+
+        return bias_forw_resh, pos, bias, bias_to_forw, bias_res
 
 class DeformableAttention(Module):
     """
@@ -92,10 +155,10 @@ class DeformableAttention(Module):
         offset_kernel_size = 5,
         group_queries = True,
         group_key_values = True,
-        to_q_bias = False,
-        to_k_bias = False,
-        to_v_bias = False,
-        to_out_bias = False,
+        to_q_bias = True,
+        to_k_bias = True,
+        to_v_bias = True,
+        to_out_bias = True,
         device = None,
         dtype = "float32",
     ):
@@ -136,12 +199,12 @@ class DeformableAttention(Module):
         self.to_offsets = Sequential(
             ConvGp(self.offset_dims, self.offset_dims, offset_kernel_size, groups = self.offset_dims, stride = downsample_factor, bias=True, device=self.device, dtype=self.dtype),
             GELU(),
-            ConvGp(self.offset_dims, 2, 1, bias = False),
+            ConvGp(self.offset_dims, 2, 1, bias = False, device=self.device, dtype=self.dtype),
             Tanh(),
             Scale(offset_scale)
         )
 
-        #self.rel_pos_bias = CPB(self.dim // 4, offset_groups = offset_groups, heads = heads, depth = 2)
+        self.rel_pos_bias = CPB(self.dim // 4, offset_groups=offset_groups, heads=heads, depth=2, device=self.device, dtype=self.dtype)
         self.dropout = Dropout(dropout)
         self.to_q = ConvGp(self.dim, self.inner_dim, 1, groups = offset_groups if group_queries else 1, bias = self.to_q_bias, device=self.device, dtype=self.dtype)
         self.to_k = ConvGp(self.dim, self.inner_dim, 1, groups = offset_groups if group_key_values else 1, bias = self.to_k_bias, device=self.device, dtype=self.dtype)
@@ -196,7 +259,9 @@ class DeformableAttention(Module):
         return_vgrid=False,
         return_norm_vgrid=False,
         return_kv_feat=False,
-        return_pos_encoding=False
+        return_pos_encoding=False,
+        return_attn=False,
+        return_bias_only=False
     ):
         """
         The forward function of the Deformable Attention function.
@@ -244,15 +309,33 @@ class DeformableAttention(Module):
             v = v.transpose((2, 3)) #(Bin, self.heads, Win/down_sample_factor*Hin/downsample_factor, self.dim_head)
         
             # similarity
-            sim = self.matmul(q, k)
+            sim = self.matmul(q, k) #(Bin, self.heads, Win/down_sample_factor*Hin/downsample_factor, Win/down_sample_factor*Hin/downsample_factor)
 
             # calculate relative positional encoding
             grid_x = create_grid_like(x) #(2, Hin, Win)
             grid_x_scaled = normalize_grid(grid_x, dim=0, out_dim=2) #(Hin, Win, 2)
+            rel_pos_bias, pos_back, bias_back, bias_to, bias_from = self.rel_pos_bias(grid_x_scaled, vgrid_scaled) #(Bin, self.heads, Win*Hin, Win/down_sample_factor*Hin/downsample_factor)
+            sim_broad = ops.broadcast_to(sim, rel_pos_bias.shape) #(Bin, self.heads, Win*Hin, Win/down_sample_factor*Hin/downsample_factor)
+            sim_rel_pos = sim_broad + rel_pos_bias #(Bin, self.heads, Win*Hin, Win/down_sample_factor*Hin/downsample_factor)
 
+            # softmax + dropout
+            attn = self.softmax(sim_rel_pos)
+            attn = self.dropout(attn) #(Bin, self.heads, Win*Hin, Win/down_sample_factor*Hin/downsample_factor) == (b, h, i, j)
+
+            # aggregate and combin heads
+            out = self.matmul(attn, v.transpose((2, 3))) #(Bin, self.heads, Win*Hin, self.dim_head) == (b, h, i, d)
+            out = out.transpose((2, 3)) #(b, h, d, i)
+            out = out.reshape((Bin, self.heads*self.dim_head, Hin, Win)) #(Bin, self.heads*self.dim_head, Hin, Win)
+            out = self.to_out(out) #(Bin, Cin, Hin, Win)
+
+        if return_bias_only:
+            return pos_back, bias_back, bias_to, bias_from
+
+        if return_attn:
+            return sim_rel_pos, attn, out
 
         if return_pos_encoding:
-            return vgrid_scaled, grid_x, grid_x_scaled
+            return vgrid_scaled, grid_x, grid_x_scaled, rel_pos_bias, sim_rel_pos, pos_back, bias_back, bias_to, bias_from
 
         if return_kv_feat:
             return kv_feat, k, v, q, sim

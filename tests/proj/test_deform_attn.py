@@ -52,6 +52,43 @@ def monitor_memory_usage():
         print(f"Memory usage: {mem_info.rss / (1024 ** 2):.2f} MB")
         time.sleep(0.05)  # Adjust the sleep interval as needed
 
+
+bias_bool = [False, True]
+@pytest.mark.parametrize("in_features, out_features, batch_size", [
+    (2, 4, 2),
+    (10, 20, 5)
+])
+@pytest.mark.parametrize("bias_bool", bias_bool)
+@pytest.mark.parametrize("device", _DEVICES)
+def test_linear_forward(in_features, out_features, batch_size, device, bias_bool):
+    # Initialize random input
+    channel = 4096
+    d_feature = 256
+    shape = (batch_size, channel, d_feature, in_features)
+    input_ndl = ndl.init.rand(*(shape), device=device, dtype='float32', requires_grad=True)
+    input_torch = torch.tensor(input_ndl.cached_data.numpy(), requires_grad=True)
+
+    # Initialize PyTorch's Linear layer
+    torch_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, bias=bias_bool)
+    
+    # Initialize your custom Linear layer
+    my_linear = ndl.nn.Linear(in_features=in_features, out_features=out_features, bias=bias_bool, device=device, dtype='float32')
+    
+    # Copy weights and biases from torch Linear to your Linear for fair comparison
+    if bias_bool:
+        torch_linear.bias.data = torch.tensor(my_linear.bias.cached_data.numpy())
+    torch_linear.weight.data = torch.tensor(my_linear.weight.cached_data.numpy().T)
+
+    # Perform forward pass
+    torch_output = torch_linear(input_torch)
+    input_ndl = input_ndl.reshape((batch_size*channel*d_feature, in_features))
+    my_output = my_linear(input_ndl)
+    my_output = my_output.reshape((batch_size, channel, d_feature, out_features))
+
+    # Check if outputs are close
+    np.testing.assert_allclose(my_output.detach().numpy(), torch_output.detach().numpy(), atol=1e-5, rtol=1e-5)
+
+
 torch.manual_seed(42)
 x_shapes = [(1, 32, 64, 64), 
             (2, 32, 64, 64),
@@ -130,14 +167,284 @@ def test_deform_attn_sign(shape, device):
 
     np.testing.assert_allclose(torch_grad.detach().numpy(), ndl_grad.detach().numpy(), atol=1e-5, rtol=1e-5)
 
+def copy_weights_and_biase_block(source_cpb_block, target_cpb_block, bias=True, plain_module=False):
+    """
+    Copies weights and biases from source_cpb to target_cpb.
+    
+    Args:
+        source_cpb: The original CPB object with weights to copy.
+        target_cpb: The target CPB object to which weights will be copied.
+    """
+    # Get all Linear layers from source and target
+    source_linear_layers = []
+    target_linear_layers = []
+
+    # Extract Linear layers from source CPB
+    if not plain_module:
+        for module in source_cpb_block.modules:
+            if isinstance(module, ndl.nn.Sequential):
+                for layer in module.modules:
+                    if isinstance(layer, ndl.nn.Linear):
+                        source_linear_layers.append(layer)
+            elif isinstance(module, ndl.nn.Linear):  # Handle final Linear layer
+                source_linear_layers.append(module)
+    else:
+        if isinstance(source_cpb_block, ndl.nn.Linear):
+            module = source_cpb_block
+            if isinstance(module, ndl.nn.Sequential):
+                for layer in module.modules:
+                    if isinstance(layer, ndl.nn.Linear):
+                        source_linear_layers.append(layer)
+            elif isinstance(module, ndl.nn.Linear):  # Handle final Linear layer
+                source_linear_layers.append(module)
+
+
+    # Extract Linear layers from target CPB
+    if not plain_module:
+        for module in target_cpb_block:
+            if isinstance(module, torch.nn.Sequential):
+                for layer in module:
+                    if isinstance(layer, torch.nn.Linear):
+                        target_linear_layers.append(layer)
+            elif isinstance(module, torch.nn.Linear):  # Handle final Linear layer
+                target_linear_layers.append(module)
+    else:
+        if isinstance(target_cpb_block, torch.nn.Linear):
+            module = target_cpb_block
+            if isinstance(module, torch.nn.Sequential):
+                for layer in module:
+                    if isinstance(layer, torch.nn.Linear):
+                        target_linear_layers.append(layer)
+            elif isinstance(module, torch.nn.Linear):  # Handle final Linear layer
+                target_linear_layers.append(module)
+
+
+    # Ensure the number of Linear layers match
+    assert len(source_linear_layers) == len(target_linear_layers), \
+        "Number of Linear layers in source and target CPBs do not match!"
+
+    # Copy weights and biases
+    for src_layer, tgt_layer in zip(source_linear_layers, target_linear_layers):
+        if bias:
+            tgt_layer.bias.data = torch.tensor(src_layer.bias.cached_data.numpy())
+        tgt_layer.weight.data = torch.tensor(src_layer.weight.cached_data.numpy().T)
+
+        if bias:
+            assert tgt_layer.bias.shape == src_layer.bias.shape
+            assert np.linalg.norm(tgt_layer.bias.detach().numpy()-src_layer.bias.detach().numpy()) < 1e-5 
+
+        assert tgt_layer.weight.shape == src_layer.weight.transpose((0, 1)).shape
+        assert np.linalg.norm(tgt_layer.weight.detach().numpy()-src_layer.weight.detach().numpy().T) < 1e-5 
+
+
+def copy_weights_and_biases(source_cpb, target_cpb, bias=True, plain_module=False):
+    """
+    Copies weights and biases from source_cpb to target_cpb.
+    
+    Args:
+        source_cpb: The original CPB object with weights to copy.
+        target_cpb: The target CPB object to which weights will be copied.
+    """
+    # Get all Linear layers from source and target
+    source_linear_layers = []
+    target_linear_layers = []
+
+    # Extract Linear layers from source CPB
+    if not plain_module:
+        for module in source_cpb.cpb_block.modules:
+            if isinstance(module, ndl.nn.Sequential):
+                for layer in module.modules:
+                    if isinstance(layer, ndl.nn.Linear):
+                        source_linear_layers.append(layer)
+            elif isinstance(module, ndl.nn.Linear):  # Handle final Linear layer
+                source_linear_layers.append(module)
+    else:
+        if isinstance(source_cpb.cpb_block, ndl.nn.Linear):
+            module = source_cpb.cpb_block
+            if isinstance(module, ndl.nn.Sequential):
+                for layer in module.modules:
+                    if isinstance(layer, ndl.nn.Linear):
+                        source_linear_layers.append(layer)
+            elif isinstance(module, ndl.nn.Linear):  # Handle final Linear layer
+                source_linear_layers.append(module)
+
+
+    # Extract Linear layers from target CPB
+    if not plain_module:
+        for module in target_cpb.mlp:
+            if isinstance(module, torch.nn.Sequential):
+                for layer in module:
+                    if isinstance(layer, torch.nn.Linear):
+                        target_linear_layers.append(layer)
+            elif isinstance(module, torch.nn.Linear):  # Handle final Linear layer
+                target_linear_layers.append(module)
+    else:
+        if isinstance(target_cpb.mlp, torch.nn.Linear):
+            module = target_cpb.mlp
+            if isinstance(module, torch.nn.Sequential):
+                for layer in module:
+                    if isinstance(layer, torch.nn.Linear):
+                        target_linear_layers.append(layer)
+            elif isinstance(module, torch.nn.Linear):  # Handle final Linear layer
+                target_linear_layers.append(module)
+
+
+    # Ensure the number of Linear layers match
+    assert len(source_linear_layers) == len(target_linear_layers), \
+        "Number of Linear layers in source and target CPBs do not match!"
+
+    # Copy weights and biases
+    for src_layer, tgt_layer in zip(source_linear_layers, target_linear_layers):
+        if bias:
+            tgt_layer.bias.data = torch.tensor(src_layer.bias.cached_data.numpy())
+        tgt_layer.weight.data = torch.tensor(src_layer.weight.cached_data.numpy().T)
+
+        if bias:
+            assert tgt_layer.bias.shape == src_layer.bias.shape
+            assert np.linalg.norm(tgt_layer.bias.detach().numpy()-src_layer.bias.detach().numpy()) < 1e-5 
+
+        assert tgt_layer.weight.shape == src_layer.weight.transpose((0, 1)).shape
+        assert np.linalg.norm(tgt_layer.weight.detach().numpy()-src_layer.weight.detach().numpy().T) < 1e-5 
 
 torch.manual_seed(42)
-x_shapes = [(1, 32, 64, 64)]
+np.random.seed(42)
+x_shapes = [(1, 32, 64, 64),
+            (4, 32, 32, 32),
+            (8, 32, 16, 16)]
+conv_qkv_bias = [False, True]
+conv_out_bias = [False, True]
+#x_shapes = [(1, 512, 64, 64)] #will be Killed
+@pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
+@pytest.mark.parametrize("conv_out_bias", conv_out_bias)
+@pytest.mark.parametrize("shape", x_shapes)
+#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+@pytest.mark.parametrize("device", _DEVICES)
+def test_deform_attn_compare_lucid_our_attn(conv_out_bias, conv_qkv_bias, shape, device):
+    # Launch a new thread to monitor the memory usage
+    #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
+    #monitor_thread.start()
+
+    # Lucidrains Deformable Attention Initialization
+    lucid_attn = DeformableAttention2DLocal(
+        dim=32,                        # Feature dimensions (C = 32)
+        dim_head=4,                    # Dimension per head
+        heads=8,                       # Attention heads
+        dropout=0.,                    # Dropout
+        downsample_factor=4,           # Downsample factor
+        offset_scale=4,                # Offset scale
+        offset_groups=2,              # No offset groups
+        offset_kernel_size=5,           # Offset kernel size
+        group_queries=True,
+        group_key_values=False,
+        conv_qkv_bias=conv_qkv_bias,
+        conv_out_bias=conv_out_bias
+    )
+
+    # Ours Deformable Attention Initialization
+    our_attn = ndl.nn.DeformableAttention(
+        dim=32,                        # Feature dimensions (C = 32)
+        dim_head=4,                    # Dimension per head
+        heads=8,                       # Attention heads
+        dropout=0.,                    # Dropout
+        downsample_factor=4,           # Downsample factor
+        offset_scale=4,                # Offset scale
+        offset_groups=2,              # No offset groups
+        offset_kernel_size=5,           # Offset kernel size
+        group_queries=True,
+        group_key_values=False,
+        to_q_bias = conv_qkv_bias,
+        to_k_bias = conv_qkv_bias,
+        to_v_bias = conv_qkv_bias,
+        to_out_bias = conv_out_bias,
+        device=device,
+        dtype='float32'
+    )
+
+    batch_size = shape[0]
+    channels   = shape[1]
+    height     = shape[2]
+    width      = shape[3]
+
+    x = ndl.init.rand(*(batch_size, channels, height, width), device=device, dtype='float32', requires_grad=True)
+    pytorch_input = torch.tensor(x.cached_data.numpy())
+
+    # (Optional) Copy biases if needed
+    if conv_qkv_bias is True:
+        lucid_attn.to_q.bias.data = torch.tensor(our_attn.to_q.bias.cached_data.numpy())
+        assert lucid_attn.to_q.bias.shape == our_attn.to_q.bias.shape
+        assert np.linalg.norm(lucid_attn.to_q.bias.detach().numpy()-our_attn.to_q.bias.detach().numpy()) < 1e-5 
+
+        lucid_attn.to_k.bias.data = torch.tensor(our_attn.to_k.bias.cached_data.numpy())
+        assert lucid_attn.to_k.bias.shape == our_attn.to_k.bias.shape
+        assert np.linalg.norm(lucid_attn.to_k.bias.detach().numpy()-our_attn.to_k.bias.detach().numpy()) < 1e-5 
+
+        lucid_attn.to_v.bias.data = torch.tensor(our_attn.to_v.bias.cached_data.numpy())
+        assert lucid_attn.to_v.bias.shape == our_attn.to_v.bias.shape
+        assert np.linalg.norm(lucid_attn.to_v.bias.detach().numpy()-our_attn.to_v.bias.detach().numpy()) < 1e-5 
+
+    if conv_out_bias is True:
+        lucid_attn.to_out.bias.data = torch.tensor(our_attn.to_out.bias.cached_data.numpy())
+        assert lucid_attn.to_out.bias.shape == our_attn.to_out.bias.shape
+        assert np.linalg.norm(lucid_attn.to_out.bias.detach().numpy()-our_attn.to_out.bias.detach().numpy()) < 1e-5 
+
+    # Copy weights
+    lucid_attn.to_q.weight.data = torch.tensor(our_attn.to_q.weight.cached_data.numpy())
+    assert lucid_attn.to_q.weight.shape == our_attn.to_q.weight.shape
+    assert np.linalg.norm(lucid_attn.to_q.weight.detach().numpy()-our_attn.to_q.weight.detach().numpy()) < 1e-5 
+
+    lucid_attn.to_k.weight.data = torch.tensor(our_attn.to_k.weight.cached_data.numpy())
+    assert lucid_attn.to_k.weight.shape == our_attn.to_k.weight.shape
+    assert np.linalg.norm(lucid_attn.to_k.weight.detach().numpy()-our_attn.to_k.weight.detach().numpy()) < 1e-5 
+
+    lucid_attn.to_v.weight.data = torch.tensor(our_attn.to_v.weight.cached_data.numpy())
+    assert lucid_attn.to_v.weight.shape == our_attn.to_v.weight.shape
+    assert np.linalg.norm(lucid_attn.to_v.weight.detach().numpy()-our_attn.to_v.weight.detach().numpy()) < 1e-5 
+
+    lucid_attn.to_out.weight.data = torch.tensor(our_attn.to_out.weight.cached_data.numpy())
+    assert lucid_attn.to_out.weight.shape == our_attn.to_out.weight.shape
+    assert np.linalg.norm(lucid_attn.to_out.weight.detach().numpy()-our_attn.to_out.weight.detach().numpy()) < 1e-5 
+
+    # Copy offset network weights, for offset network layer0 and layer2 (ConvGp)
+    for i in [0, 2]:
+        sub_module = lucid_attn.to_offsets[i]
+        sub_module.weight.data = torch.tensor(our_attn.to_offsets.modules[i].weight.cached_data.numpy())
+        assert sub_module.weight.shape == our_attn.to_offsets.modules[i].weight.shape
+        assert np.linalg.norm(sub_module.weight.detach().numpy()-our_attn.to_offsets.modules[i].weight.detach().numpy()) < 1e-5 
+
+        if i == 0:
+            sub_module.bias.data = torch.tensor(our_attn.to_offsets.modules[i].bias.cached_data.numpy())
+            assert sub_module.bias.shape == our_attn.to_offsets.modules[i].bias.shape
+            assert np.linalg.norm(sub_module.bias.detach().numpy()-our_attn.to_offsets.modules[i].bias.detach().numpy()) < 1e-5 
+
+    # Copy weights and bias of Linear() in CPB
+    copy_weights_and_biases(our_attn.rel_pos_bias, lucid_attn.rel_pos_bias)
+
+    # Forward pass
+    kv_feat_orig, sim_luc, attn_luc, out_luc = lucid_attn(pytorch_input, return_attn=True)
+    our_attn.kv_feats_from_luc = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
+    sim_our, attn_our, out_our = our_attn(x, return_attn=True)
+
+    # Comapre
+    assert sim_luc.shape == sim_our.shape
+    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 1e-3 
+    assert attn_luc.shape == attn_our.shape
+    assert np.linalg.norm(attn_luc.detach().numpy()-attn_our.detach().numpy()) < 1e-3 
+    assert out_luc.shape == out_our.shape
+    assert np.linalg.norm(out_luc.detach().numpy()-out_our.detach().numpy()) < 1e-3 
+
+
+torch.manual_seed(42)
+#x_shapes = [(1, 32, 64, 64)]
+x_shapes = [(1, 32, 64, 64),
+            (4, 32, 32, 32),
+            (8, 32, 32, 32),
+            (16, 32, 16, 16)]
 conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_pos_encoding(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -226,18 +533,38 @@ def test_deform_attn_compare_lucid_our_pos_encoding(conv_qkv_bias, shape, device
             assert sub_module.bias.shape == our_attn.to_offsets.modules[i].bias.shape
             assert np.linalg.norm(sub_module.bias.detach().numpy()-our_attn.to_offsets.modules[i].bias.detach().numpy()) < 1e-5 
 
-    # Forward pass
-    kv_feat_orig, vgrid_scaled_luc, grid_x_luc, grid_x_scaled_luc = lucid_attn(pytorch_input, return_pos_encoding=True)
-    our_attn.kv_feats_from_luc = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
-    vgrid_scaled_our, grid_x_our, grid_x_scaled_our = our_attn(x, return_pos_encoding=True)
+    # Copy weights and bias of Linear() in CPB
+    copy_weights_and_biases(our_attn.rel_pos_bias, lucid_attn.rel_pos_bias)
+    #copy_weights_and_biase_block(our_attn.rel_pos_bias.cpb_block2, lucid_attn.rel_pos_bias.mlp2, bias=False, plain_module=True)
 
-    # Comapre grid_x
+    # Forward pass
+    kv_feat_orig, vgrid_scaled_luc, grid_x_luc, grid_x_scaled_luc, rel_pos_bias_luc, sim_luc, pos_back_luc, bias_back_luc, bias_to_luc, bias_from_luc = lucid_attn(pytorch_input, return_pos_encoding=True)
+    #kv_feat_orig, pos_back_luc, bias_back_luc, bias_to_luc, bias_from_luc = lucid_attn(pytorch_input, return_pos_encoding=True, return_bias_only=True)
+    our_attn.kv_feats_from_luc = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
+    vgrid_scaled_our, grid_x_our, grid_x_scaled_our, rel_pos_bias_our, sim_our, pos_back_our, bias_back_our, bias_to_our, bias_from_our = our_attn(x, return_pos_encoding=True)
+    #pos_back_our, bias_back_our, bias_to_our, bias_from_our = our_attn(x, return_pos_encoding=True, return_bias_only=True)
+
+    # Comapre
     assert vgrid_scaled_luc.shape == vgrid_scaled_our.shape
     assert np.linalg.norm(vgrid_scaled_luc.detach().numpy()-vgrid_scaled_our.detach().numpy()) < 1e-3 
     assert grid_x_luc.shape == grid_x_our.shape
     assert np.linalg.norm(grid_x_luc.detach().numpy()-grid_x_our.detach().numpy()) < 1e-3 
     assert grid_x_scaled_luc.shape == grid_x_scaled_our.shape
     assert np.linalg.norm(grid_x_scaled_luc.detach().numpy()-grid_x_scaled_our.detach().numpy()) < 1e-3 
+
+    assert pos_back_luc.shape == pos_back_our.shape
+    assert np.linalg.norm(pos_back_luc.detach().numpy()-pos_back_our.detach().numpy()) < 1e-3 
+    assert bias_back_luc.shape == bias_back_our.shape
+    assert np.linalg.norm(bias_back_luc.detach().numpy()-bias_back_our.detach().numpy()) < 1e-3 
+    assert bias_to_luc.shape == bias_to_our.shape
+    assert np.linalg.norm(bias_to_luc.detach().numpy()-bias_to_our.detach().numpy()) < 1e-3 
+    assert bias_from_luc.shape == bias_from_our.shape
+    assert np.linalg.norm(bias_from_luc.detach().numpy()-bias_from_our.detach().numpy()) < 1e-3 
+
+    assert rel_pos_bias_luc.shape == rel_pos_bias_our.shape
+    assert np.linalg.norm(rel_pos_bias_luc.detach().numpy()-rel_pos_bias_our.detach().numpy()) < 1e-3 
+    assert sim_luc.shape == sim_our.shape
+    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 1e-3 
 
 
 torch.manual_seed(42)
@@ -246,7 +573,8 @@ conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_qkv(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -366,7 +694,8 @@ conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_normalized_grid(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -461,7 +790,8 @@ conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_offset(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -553,7 +883,8 @@ conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_inputq(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -642,7 +973,8 @@ out_channels = [16, 32, 64]
 @pytest.mark.parametrize("stride, padding, groups, kernel_size", conv_shapes)
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-@pytest.mark.parametrize("device", _DEVICES_ATTN)
+#@pytest.mark.parametrize("device", _DEVICES_ATTN)
+@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_group_conv(out_channel, stride, padding, groups, kernel_size, conv_qkv_bias, shape, device):
     bs, in_channels, height, width = shape
     # Needle setup

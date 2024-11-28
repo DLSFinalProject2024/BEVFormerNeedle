@@ -478,27 +478,23 @@ void EwiseSign(const CudaArray& a, CudaArray* out) {
 }
 
 
-////////////////////////////////////////////////////////////////////////////////
-// Elementwise and scalar operations
-////////////////////////////////////////////////////////////////////////////////
-
 __global__ void MatmulKernel(const scalar_t* a, const scalar_t* b, scalar_t* out, uint32_t M, uint32_t N, uint32_t P) {
   // Calculate the global index of the thread.
   // Shared Memory
   __shared__ scalar_t Mds[TILE][TILE];
   __shared__ scalar_t Nds[TILE][TILE];
 
-  int block_x = blockIdx.x;
-  int block_y = blockIdx.y;
-  int thread_x = threadIdx.x;
-  int thread_y = threadIdx.y;
+  int block_x = blockIdx.y;
+  int block_y = blockIdx.x;
+  int thread_x = threadIdx.y;
+  int thread_y = threadIdx.x;
 
   int row = block_y*TILE + thread_y;
   int col = block_x*TILE + thread_x;
 
   scalar_t product_val = 0;
 
-  for(int m=0; m < (N+TILE-1)/TILE; ++m){
+  for(int m=0; m < int((N+TILE-1)/TILE); ++m){
     // Cooperative Fetching
     int a_x = m*TILE + thread_x;
     int a_y = row;
@@ -534,7 +530,7 @@ __global__ void MatmulKernel(const scalar_t* a, const scalar_t* b, scalar_t* out
 
 void Matmul(const CudaArray& a, const CudaArray& b, CudaArray* out, uint32_t M, uint32_t N,
             uint32_t P) {
-  /**
+  /*
    * Multiply two (compact) matrices into an output (also comapct) matrix.  You will want to look
    * at the lecture and notes on GPU-based linear algebra to see how to do this.  Since ultimately
    * mugrade is just evaluating correctness, you _can_ implement a version that simply parallelizes
@@ -557,13 +553,13 @@ void Matmul(const CudaArray& a, const CudaArray& b, CudaArray* out, uint32_t M, 
    */
 
   /// BEGIN SOLUTION
-  dim3 dimGrid((P+TILE-1)/TILE, (M+TILE-1)/TILE);
+  //https://www.cs.emory.edu/~cheung/Courses/355/Syllabus/94-CUDA/SLIDES/s08.html
+  dim3 dimGrid((M+TILE-1)/TILE, (P+TILE-1)/TILE);
   dim3 dimBlock(TILE, TILE);
 
   MatmulKernel<<<dimGrid, dimBlock>>>(a.ptr, b.ptr, out->ptr, M, N, P);
   /// END SOLUTION
 }
-
 ////////////////////////////////////////////////////////////////////////////////
 // Max and sum reductions
 ////////////////////////////////////////////////////////////////////////////////

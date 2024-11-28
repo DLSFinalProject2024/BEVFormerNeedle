@@ -72,6 +72,10 @@ class CPB(nn.Module):
 
         self.mlp.append(nn.Linear(dim, heads // offset_groups))
 
+        #self.mlp = nn.Linear(dim, heads // offset_groups, bias=False)
+        #self.mlp1 = nn.ReLU()
+        #self.mlp2 = nn.Linear(in_features=2, out_features=4, bias=False)
+
     def forward(self, grid_q, grid_kv):
         device, dtype = grid_q.device, grid_kv.dtype
 
@@ -80,13 +84,21 @@ class CPB(nn.Module):
 
         pos = rearrange(grid_q, 'b i c -> b i 1 c') - rearrange(grid_kv, 'b j c -> b 1 j c')
         bias = torch.sign(pos) * torch.log(pos.abs() + 1)  # log of distance is sign(rel_pos) * log(abs(rel_pos) + 1)
+        #test
+        pos_back = pos
+        bias_back = bias
+        b, i, j, c = bias.shape
+        bias_to = torch.reshape(bias, (bias.shape[0] * bias.shape[1] * bias.shape[2], bias.shape[3])) #(b*i*j, c)
 
         for layer in self.mlp:
             bias = layer(bias)
 
+        #test
+        bias_from = bias
+
         bias = rearrange(bias, '(b g) i j o -> b (g o) i j', g = self.offset_groups)
 
-        return bias
+        return bias, pos_back, bias_back, bias_to, bias_from
 
 # main class
 
@@ -104,7 +116,8 @@ class DeformableAttention2DLocal(nn.Module):
         offset_kernel_size = 5,
         group_queries = True,
         group_key_values = True,
-        conv_qkv_bias = False
+        conv_qkv_bias = True,
+        conv_out_bias = True
     ):
         super().__init__()
         offset_scale = default(offset_scale, downsample_factor)
@@ -158,9 +171,9 @@ class DeformableAttention2DLocal(nn.Module):
         self.to_q = nn.Conv2d(dim, inner_dim, 1, groups = offset_groups if group_queries else 1, bias = conv_qkv_bias)
         self.to_k = nn.Conv2d(dim, inner_dim, 1, groups = offset_groups if group_key_values else 1, bias = conv_qkv_bias)
         self.to_v = nn.Conv2d(dim, inner_dim, 1, groups = offset_groups if group_key_values else 1, bias = conv_qkv_bias)
-        self.to_out = nn.Conv2d(inner_dim, dim, 1)
+        self.to_out = nn.Conv2d(inner_dim, dim, 1, bias = conv_out_bias)
 
-    def forward(self, x, return_vgrid=False, return_offsets=False, return_norm_vgrid=False, return_kv_feat=False, return_pos_encoding=False):
+    def forward(self, x, return_vgrid=False, return_offsets=False, return_norm_vgrid=False, return_kv_feat=False, return_pos_encoding=False, return_attn=False, return_bias_only=False):
         """
         b - batch
         h - heads
@@ -235,8 +248,12 @@ class DeformableAttention2DLocal(nn.Module):
         grid_x = grid
         grid_x_scaled = grid_scaled
 
-        rel_pos_bias = self.rel_pos_bias(grid_scaled, vgrid_scaled)
+        #test
+        rel_pos_bias, pos_back, bias_back, bias_to, bias_from = self.rel_pos_bias(grid_scaled, vgrid_scaled)
         sim = sim + rel_pos_bias
+
+        #test
+        sim_test2 = sim
 
         # numerical stability
 
@@ -247,14 +264,24 @@ class DeformableAttention2DLocal(nn.Module):
         attn = sim.softmax(dim = -1)
         attn = self.dropout(attn)
 
+        #test
+        attn_test = attn
+
         # aggregate and combine heads
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
         out = self.to_out(out)
 
+
+        if return_bias_only:
+            return kv_feat_orig, pos_back, bias_back, bias_to, bias_from
+
+        if return_attn:
+            return kv_feat_orig, sim_test2, attn_test, out
+
         if return_pos_encoding:
-            return kv_feat_orig, vgrid_scaled, grid_x, grid_x_scaled
+            return kv_feat_orig, vgrid_scaled, grid_x, grid_x_scaled, rel_pos_bias, sim_test2, pos_back, bias_back, bias_to, bias_from
 
         if return_kv_feat:
             return kv_feat_orig, kv_feats, k_test, v_test, q_test, sim_test

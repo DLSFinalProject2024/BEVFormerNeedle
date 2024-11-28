@@ -202,30 +202,30 @@ def test_deform_attn_1D_lucidrains(shape):
 
 # Parameters for testing grid_sample
 grid_sample_params = [
-    (1, 1, 1, 1),
-    (1, 1, 3, 3),
-    (1, 1, 3, 4),
-    (1, 1, 4, 3),
-    (1, 3, 5, 100),
-    (1, 3, 32, 16),
-    (2, 3, 32, 32),
-    (4, 1, 64, 64),
+    (1, 1, 1, 1, 1, 2),
+    (1, 1, 3, 3, 3, 3),
+    (1, 1, 3, 4, 3, 4),
+    (1, 2, 4, 3, 4, 3),
+    (1, 3, 5, 100, 16, 16),
+    (1, 3, 32, 16, 1, 1),
+    (2, 3, 32, 32, 15, 18),
+    (4, 1, 64, 64, 128, 1),
 ]
 
-# @pytest.mark.parametrize("N,C,H,W", grid_sample_params)
+# @pytest.mark.parametrize("N,C,H,W,H_out,W_out", grid_sample_params)
 # @pytest.mark.parametrize("mode", ['bilinear', 'nearest'])
 # @pytest.mark.parametrize("padding_mode", ['zeros', 'border', 'reflection'])
 # @pytest.mark.parametrize("align_corners", [True, False])
 # @pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
-@pytest.mark.parametrize("N,C,H,W", grid_sample_params)
+@pytest.mark.parametrize("N,C,H,W,H_out,W_out", grid_sample_params)
 @pytest.mark.parametrize("mode", ['bilinear'])
 @pytest.mark.parametrize("padding_mode", ['zeros'])
 @pytest.mark.parametrize("align_corners", [False])
 @pytest.mark.parametrize("device", _DEVICES)
-def test_nn_grid_sample(N, C, H, W, mode, padding_mode, align_corners, device):
+def test_nn_grid_sample(N, C, H, W, H_out, W_out, mode, padding_mode, align_corners, device):
     np.random.seed(0)
     a = ndl.init.rand(N, C, H, W, device=device, requires_grad=True)
-    grid = ndl.init.rand(N, H, W, 2, low=-1.0, high=1.0, device=device, requires_grad=True)
+    grid = ndl.init.rand(N, H_out, W_out, 2, low=-1.0, high=1.0, device=device, requires_grad=True)
     out = ops.grid_sample(a, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
 
     a_torch = torch.tensor(a.cached_data.numpy(), requires_grad=True)

@@ -166,7 +166,7 @@ class DeformableAttention(Module):
         super().__init__()
 
         # For testing
-        self.kv_feats_from_luc = None
+        self.kv_feats_orig = None
 
         self.device = device
         self.dtype = dtype
@@ -287,9 +287,12 @@ class DeformableAttention(Module):
         vgrid = grid+offsets #(Bin*self.offset_groups, 2, Hin/downsample_factor, Win/downsample_factor)
         vgrid_scaled = normalize_grid(vgrid, dim=1, out_dim=3) #(Bin*self.offset_groups, Hin/downsample_factor, Win/downsample_factor, 2)
 
+        grouped_x = x.reshape((Bin*self.offset_groups, self.offset_dims, Hin, Win)) #(Bin*self.offset_groups, self.offset_dims, Hin, Win)
+        self.kv_feats_orig = ops.grid_sample(grouped_x, vgrid_scaled, mode='bilinear', padding_mode='zeros', align_corners=False)
+
         # sampling features
-        if self.kv_feats_from_luc is not None:
-            kv_feat = self.kv_feats_from_luc.reshape((Bin, self.offset_groups*self.offset_dims, offsets.shape[-2], offsets.shape[-1])) #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
+        if self.kv_feats_orig is not None:
+            kv_feat = self.kv_feats_orig.reshape((Bin, self.offset_groups*self.offset_dims, offsets.shape[-2], offsets.shape[-1])) #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
             k, v = self.to_k(kv_feat), self.to_v(kv_feat) #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
             q = q*self.scale #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
 

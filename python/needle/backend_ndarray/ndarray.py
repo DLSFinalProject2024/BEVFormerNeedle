@@ -638,6 +638,27 @@ class NDArray:
         return pad_result        
         ### END YOUR SOLUTION
 
+    def grid_sample(self, grid, mode='bilinear', padding_mode='zeros', align_corners=False):
+        assert len(self.shape) == 4
+        assert len(grid.shape) == 4
+        b, c, h, w = self.shape
+        assert grid.shape == (b, h, w, 2)
+        out = self.device.full(self.shape, 0, dtype=self.dtype)
+        self.device.grid_sample(self._handle, grid._handle, out._handle, (b, c, h, w))
+        return out
+    
+    def grid_sample_backward(self, a, grid, mode='bilinear', padding_mode='zeros', align_corners=False):
+        assert len(a.shape) == 4
+        assert len(grid.shape) == 4
+        self = self.compact()
+        assert len(self.shape) == 4
+        b, c, h, w = self.shape
+        assert grid.shape == (b, h, w, 2)
+        a_grad = self.device.full(a.shape, 0, dtype=self.dtype)
+        grid_grad = self.device.full(grid.shape, 0, dtype=self.dtype)
+        self.device.grid_sample_backward(self._handle, a._handle, grid._handle, a_grad._handle, grid_grad._handle, (b, c, h, w))
+        return a_grad, grid_grad
+
 def array(a, dtype="float32", device=None):
     """Convenience methods to match numpy a bit more closely."""
     dtype = "float32" if dtype is None else dtype

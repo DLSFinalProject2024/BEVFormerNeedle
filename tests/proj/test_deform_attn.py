@@ -665,10 +665,13 @@ def test_deform_attn_compare_lucid_our_qkv(conv_qkv_bias, shape, device):
 
     # Forward pass
     kv_feat_orig, kv_feats_luc, k_luc, v_luc, q_luc, sim_luc = lucid_attn(pytorch_input, return_kv_feat=True)
-    our_attn.kv_feats_from_luc = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
+    #our_attn.kv_feats_orig = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
     kv_feat_ours, k_our, v_our, q_our, sim_our = our_attn(x, return_kv_feat=True)
 
     # Comapre kvq
+    assert kv_feat_orig.shape == our_attn.kv_feats_orig.shape
+    assert np.linalg.norm(kv_feat_orig.detach().numpy()-our_attn.kv_feats_orig.detach().numpy()) < 1e-3 
+
     assert kv_feats_luc.shape == kv_feat_ours.shape
     assert np.linalg.norm(kv_feats_luc.detach().numpy()-kv_feats_luc.detach().numpy()) < 1e-3 
 

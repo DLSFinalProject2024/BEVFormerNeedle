@@ -199,8 +199,8 @@ def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None)
             opt.step()
 
         # Compute metrics
-        total_loss += loss.numpy() * batch_size
-        correct += (logits.numpy().argmax(axis=1) == batch_labels.numpy()).sum()
+        total_loss += loss.detach().numpy() * batch_size
+        correct += (logits.detach().numpy().argmax(axis=1) == batch_labels.detach().numpy()).sum()
 
     avg_loss = total_loss / len(dataloader.dataset)
     avg_acc = correct / len(dataloader.dataset)

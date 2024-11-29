@@ -145,14 +145,14 @@ class VisionTransformer(nn.Module):
 
         # Ours Deformable Attention Initialization
         self.dattn = nn.DeformableAttention(
-            dim=8,                        # Feature dimensions (C = 32)
-            dim_head=4,                    # Dimension per head
+            dim=4,                         # Feature dimensions
+            dim_head=2,                    # Dimension per head
             heads=2,                       # Attention heads
             dropout=0.,                    # Dropout
             downsample_factor=4,           # Downsample factor
             offset_scale=4,                # Offset scale
-            offset_groups=2,              # No offset groups
-            offset_kernel_size=5,           # Offset kernel size
+            offset_groups=2,               # Offset groups
+            offset_kernel_size=5,          # Offset kernel size
             group_queries=True,
             group_key_values=True,
             to_q_bias = True,
@@ -162,8 +162,8 @@ class VisionTransformer(nn.Module):
             device=device,
             dtype='float32'
         )
-        self.conv_preprocess = nn.ConvGp(3, 8, 3, groups = 1, bias=False, device=device, dtype=dtype)
-        self.conv_postprocess = nn.ConvGp(8, 3, 3, groups = 1, bias=False, device=device, dtype=dtype)
+        self.conv_preprocess = nn.ConvGp(3, 4, 3, groups = 1, bias=False, device=device, dtype=dtype)
+        self.conv_postprocess = nn.ConvGp(4, 3, 3, groups = 1, bias=False, device=device, dtype=dtype)
 
     def forward(self, x):
         """

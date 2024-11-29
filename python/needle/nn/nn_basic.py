@@ -100,10 +100,10 @@ class Linear(Module):
         self.out_features = out_features
 
         ### BEGIN YOUR SOLUTION
-        self.weight = Parameter(init.kaiming_uniform(fan_in=in_features, fan_out=out_features, dtype=dtype, device=device))
+        self.weight = Parameter(init.kaiming_uniform(fan_in=in_features, fan_out=out_features, dtype=dtype, device=device, requires_grad=True))
         #self.weight = Parameter(self.weight, dtype=dtype)
         if bias:
-            self.bias = Parameter(init.kaiming_uniform(fan_in=out_features, fan_out=1, dtype=dtype, device=device).reshape((1, out_features)))
+            self.bias = Parameter(init.kaiming_uniform(fan_in=out_features, fan_out=1, dtype=dtype, device=device, requires_grad=True).reshape((1, out_features)))
             '''
             self.bias = init.kaiming_uniform(fan_in=out_features, fan_out=1, dtype=dtype)
             self.bias = ops.reshape(self.bias, (1, -1))
@@ -206,9 +206,9 @@ class BatchNorm1d(Module):
         self.eps = eps
         self.momentum = momentum
         ### BEGIN YOUR SOLUTION
-        self.weight = init.ones(*(1, dim), device=device, dtype=dtype)
+        self.weight = init.ones(*(1, dim), device=device, dtype=dtype, requires_grad=True)
         self.weight = Parameter(self.weight, dtype=dtype, device=device)
-        self.bias   = init.zeros(*(1, dim), device=device, dtype=dtype)
+        self.bias   = init.zeros(*(1, dim), device=device, dtype=dtype, requires_grad=True)
         self.bias   = Parameter(self.bias, dtype=dtype, device=device)
         self.running_mean   = init.zeros(*(dim,), device=device, dtype=dtype).data
         self.running_var    = init.ones(*(dim,), device=device, dtype=dtype).data
@@ -277,10 +277,10 @@ class LayerNorm1d(Module):
         self.dim = dim
         self.eps = eps
         ### BEGIN YOUR SOLUTION
-        self.weight = init.ones(*(1, dim))
-        self.weight = Parameter(self.weight, dtype=dtype, device=device)
-        self.bias   = init.zeros(*(1, dim))
-        self.bias   = Parameter(self.bias, dtype=dtype, device=device)
+        self.weight = init.ones(*(1, dim), dtype=dtype, device=device, requires_grad=True)
+        self.weight = Parameter(self.weight)
+        self.bias   = init.zeros(*(1, dim), dtype=dtype, device=device, requires_grad=True)
+        self.bias   = Parameter(self.bias)
         ### END YOUR SOLUTION
 
     def forward(self, x: Tensor) -> Tensor:

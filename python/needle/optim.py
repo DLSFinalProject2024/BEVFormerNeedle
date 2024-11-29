@@ -83,15 +83,16 @@ class Adam(Optimizer):
         ### BEGIN YOUR SOLUTION
         self.t+=1
         for id, w in enumerate(self.params):
-            gt = ndl.Tensor(w.grad.data, dtype=w.data.dtype) + self.weight_decay*w.data
+            #gt = ndl.Tensor(w.grad.data, dtype=w.data.dtype) + self.weight_decay*w.data
+            gt = ndl.Tensor(w.grad.detach(), dtype=w.data.dtype) + self.weight_decay*w.detach()
             if id not in self.m:
-                self.m[id] = ndl.init.zeros(*w.shape, device=w.device)
+                self.m[id] = ndl.init.zeros(*w.shape, device=w.device, dtype=w.dtype)
             if id not in self.v:
-                self.v[id] = ndl.init.zeros(*w.shape, device=w.device)
+                self.v[id] = ndl.init.zeros(*w.shape, device=w.device, dtype=w.dtype)
 
-            self.m[id] = self.beta1*self.m[id] + (1-self.beta1)*gt
-            self.v[id] = self.beta2*self.v[id] + (1-self.beta2)*(gt**2)
-            mtbar = self.m[id]/(1-self.beta1**self.t)
-            vtbar = self.v[id]/(1-self.beta2**self.t)
-            w.data = w.data - self.lr*mtbar/(vtbar**0.5 + self.eps)
+            self.m[id] = self.beta1*self.m[id].detach() + (1-self.beta1)*gt.detach()
+            self.v[id] = self.beta2*self.v[id].detach() + (1-self.beta2)*(gt.detach()**2)
+            mtbar = self.m[id].detach()/(1-self.beta1**self.t)
+            vtbar = self.v[id].detach()/(1-self.beta2**self.t)
+            w.data = w.data - self.lr*mtbar.detach()/(vtbar.detach()**0.5 + self.eps)
         ### END YOUR SOLUTION

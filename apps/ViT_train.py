@@ -20,7 +20,7 @@ if __name__ == "__main__":
     print(f"len(test_dataset) = {len(test_dataset)}")
 
     # Create DataLoader instances
-    batch_size = 128
+    batch_size = 64
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 

@@ -145,9 +145,9 @@ class VisionTransformer(nn.Module):
 
         # Ours Deformable Attention Initialization
         self.dattn = nn.DeformableAttention(
-            dim=32,                        # Feature dimensions (C = 32)
-            dim_head=8,                    # Dimension per head
-            heads=4,                       # Attention heads
+            dim=8,                        # Feature dimensions (C = 32)
+            dim_head=4,                    # Dimension per head
+            heads=2,                       # Attention heads
             dropout=0.,                    # Dropout
             downsample_factor=4,           # Downsample factor
             offset_scale=4,                # Offset scale
@@ -162,15 +162,17 @@ class VisionTransformer(nn.Module):
             device=device,
             dtype='float32'
         )
-        self.conv_preprocess = nn.ConvGp(3, 32, 3, groups = 1, bias=True, device=device, dtype=dtype)
+        self.conv_preprocess = nn.ConvGp(3, 8, 3, groups = 1, bias=False, device=device, dtype=dtype)
+        self.conv_postprocess = nn.ConvGp(8, 3, 3, groups = 1, bias=False, device=device, dtype=dtype)
 
     def forward(self, x):
         """
         Input: (batch, in_channels, img_size, img_size)
         Output: (batch, num_classes)
         """
-        #x = self.conv_preprocess(x) #(batch, c=32, image_size, image_size)
-        #x = self.dattn(x) #(batch, c=32, image_size, image_size)
+        x = self.conv_preprocess(x) #(batch, c=16, image_size, image_size)
+        x, offsets, vgrid = self.dattn(x) #(batch, c=16, image_size, image_size)
+        x = self.conv_postprocess(x) #(batch, c=3, image_size, image_size)
 
         x = self.patch_embed(x)  # (batch, num_patches, embed_dim)
         batch_size, num_patches, embed_dim = x.shape

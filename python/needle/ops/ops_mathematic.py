@@ -363,9 +363,10 @@ class Log(TensorOp):
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
         #input('divide1')
-        grad_a = multiply(out_grad, divide(Tensor(1), node.inputs[0]))
+        #grad_a = multiply(out_grad, divide(Tensor(1), node.inputs[0]))
         #input('divide2')
-        return grad_a
+        #return grad_a
+        return out_grad / node.inputs[0]
         ### END YOUR SOLUTION
 
 

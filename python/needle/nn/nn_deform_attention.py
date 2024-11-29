@@ -161,11 +161,13 @@ class DeformableAttention(Module):
         to_out_bias = True,
         device = None,
         dtype = "float32",
+        return_out_only=False
     ):
 
         super().__init__()
 
         # For testing
+        self.return_out_only=return_out_only
         self.kv_feats_orig = None
 
         self.device = device
@@ -266,6 +268,7 @@ class DeformableAttention(Module):
         return_pos_encoding=False,
         return_attn=False,
         return_bias_only=False,
+        return_out_only=False
     ):
         """
         The forward function of the Deformable Attention function.
@@ -302,12 +305,12 @@ class DeformableAttention(Module):
         if self.kv_feats_orig is not None:
             kv_feat = self.kv_feats_orig.reshape((Bin, self.offset_groups*self.offset_dims, offsets.shape[-2], offsets.shape[-1])) #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
             k, v = self.to_k(kv_feat), self.to_v(kv_feat) #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
-            q = q*self.scale #(Bin, Cin, Hin/downsample_factor, Win/downsample_factor)
+            q = q*self.scale #(Bin, Cin, Hin, Win)
 
             #Q
             q_bin, q_cin, q_hin, q_win = q.shape
             q = q.reshape((Bin, self.heads, self.dim_head, q_hin*q_win))
-            q = q.transpose((2, 3)) #(Bin, self.heads, Win/down_sample_factor*Hin/downsample_factor, self.dim_head)
+            q = q.transpose((2, 3)) #(Bin, self.heads, Win*Hin, self.dim_head)
 
             #K
             k_bin, k_cin, k_hin, k_win = k.shape
@@ -320,7 +323,7 @@ class DeformableAttention(Module):
             v = v.transpose((2, 3)) #(Bin, self.heads, Win/down_sample_factor*Hin/downsample_factor, self.dim_head)
         
             # similarity
-            sim = self.matmul(q, k) #(Bin, self.heads, Win/down_sample_factor*Hin/downsample_factor, Win/down_sample_factor*Hin/downsample_factor)
+            sim = self.matmul(q, k) #(Bin, self.heads, Win*Hin, Win/down_sample_factor*Hin/downsample_factor)
 
             # calculate relative positional encoding
             grid_x = create_grid_like(x) #(2, Hin, Win)
@@ -359,6 +362,9 @@ class DeformableAttention(Module):
 
         if return_orig_q:
             return orig_q, grouped_queries
+
+        if return_out_only or self.return_out_only:
+            return out
 
         return out, offsets, vgrid
 

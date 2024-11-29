@@ -143,15 +143,17 @@ class VisionTransformer(nn.Module):
         )
         self.head = nn.Linear(embed_dim, num_classes, device=device, dtype=dtype)
 
+        
         # Ours Deformable Attention Initialization
+        '''
         self.dattn = nn.DeformableAttention(
-            dim=4,                         # Feature dimensions
-            dim_head=2,                    # Dimension per head
-            heads=2,                       # Attention heads
+            dim=16,                         # Feature dimensions
+            dim_head=4,                    # Dimension per head
+            heads=4,                       # Attention heads
             dropout=0.,                    # Dropout
             downsample_factor=4,           # Downsample factor
             offset_scale=4,                # Offset scale
-            offset_groups=2,               # Offset groups
+            offset_groups=4,               # Offset groups
             offset_kernel_size=5,          # Offset kernel size
             group_queries=True,
             group_key_values=True,
@@ -162,17 +164,46 @@ class VisionTransformer(nn.Module):
             device=device,
             dtype='float32'
         )
-        self.conv_preprocess = nn.ConvGp(3, 4, 3, groups = 1, bias=False, device=device, dtype=dtype)
-        self.conv_postprocess = nn.ConvGp(4, 3, 3, groups = 1, bias=False, device=device, dtype=dtype)
+
+        self.conv_preprocess = nn.Conv(3, 16, 3, stride=1, bias=False, device=device, dtype=dtype)
+        self.conv_postprocess = nn.Conv(16, 3, 3, stride=1, bias=False, device=device, dtype=dtype)
+        '''
+        self.dattn = nn.Residual(
+            nn.Sequential(
+                nn.Conv(3, 8, 3, stride=1, bias=False, device=device, dtype=dtype),
+                nn.DeformableAttention(
+                    dim=8,                         # Feature dimensions
+                    dim_head=4,                    # Dimension per head
+                    heads=2,                       # Attention heads
+                    dropout=0.,                    # Dropout
+                    downsample_factor=4,           # Downsample factor
+                    offset_scale=4,                # Offset scale
+                    offset_groups=2,               # Offset groups
+                    offset_kernel_size=5,          # Offset kernel size
+                    group_queries=True,
+                    group_key_values=True,
+                    to_q_bias = True,
+                    to_k_bias = True,
+                    to_v_bias = True,
+                    to_out_bias = True,
+                    device=device,
+                    dtype='float32',
+                    return_out_only=True
+                ),
+                nn.Conv(8, 3, 3, stride=1, bias=False, device=device, dtype=dtype)
+            )
+        )
+
 
     def forward(self, x):
         """
         Input: (batch, in_channels, img_size, img_size)
         Output: (batch, num_classes)
         """
-        x = self.conv_preprocess(x) #(batch, c=16, image_size, image_size)
-        x, offsets, vgrid = self.dattn(x) #(batch, c=16, image_size, image_size)
-        x = self.conv_postprocess(x) #(batch, c=3, image_size, image_size)
+        #x = self.conv_preprocess(x) #(batch, c=16, image_size, image_size)
+        #x, offsets, vgrid = self.dattn(x) #(batch, c=16, image_size, image_size)
+        #x = self.conv_postprocess(x) #(batch, c=3, image_size, image_size)
+        x = self.dattn(x) #(batch, c=8, image_size, image_size)
 
         x = self.patch_embed(x)  # (batch, num_patches, embed_dim)
         batch_size, num_patches, embed_dim = x.shape

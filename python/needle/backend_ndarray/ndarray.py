@@ -642,9 +642,9 @@ class NDArray:
         assert len(self.shape) == 4
         assert len(grid.shape) == 4
         b, c, h, w = self.shape
-        assert grid.shape == (b, h, w, 2)
-        out = self.device.full(self.shape, 0, dtype=self.dtype)
-        self.device.grid_sample(self._handle, grid._handle, out._handle, (b, c, h, w))
+        _, h_out, w_out, _ = grid.shape
+        out = self.device.full((b, c, h_out, w_out), 0, dtype=self.dtype)
+        self.device.grid_sample(self._handle, grid._handle, out._handle, (b, c, h, w), (b, h_out, w_out, 2))
         return out
     
     def grid_sample_backward(self, a, grid, mode='bilinear', padding_mode='zeros', align_corners=False):
@@ -652,11 +652,11 @@ class NDArray:
         assert len(grid.shape) == 4
         self = self.compact()
         assert len(self.shape) == 4
-        b, c, h, w = self.shape
-        assert grid.shape == (b, h, w, 2)
+        b, c, h, w = a.shape
+        _, h_out, w_out, _ = grid.shape
         a_grad = self.device.full(a.shape, 0, dtype=self.dtype)
         grid_grad = self.device.full(grid.shape, 0, dtype=self.dtype)
-        self.device.grid_sample_backward(self._handle, a._handle, grid._handle, a_grad._handle, grid_grad._handle, (b, c, h, w))
+        self.device.grid_sample_backward(self._handle, a._handle, grid._handle, a_grad._handle, grid_grad._handle, (b, c, h, w), (b, h_out, w_out, 2))
         return a_grad, grid_grad
 
 def array(a, dtype="float32", device=None):

@@ -173,7 +173,7 @@ class DeformableAttention2DLocal(nn.Module):
         self.to_v = nn.Conv2d(dim, inner_dim, 1, groups = offset_groups if group_key_values else 1, bias = conv_qkv_bias)
         self.to_out = nn.Conv2d(inner_dim, dim, 1, bias = conv_out_bias)
 
-    def forward(self, x, return_vgrid=False, return_offsets=False, return_norm_vgrid=False, return_kv_feat=False, return_pos_encoding=False, return_attn=False, return_bias_only=False):
+    def forward(self, x, return_vgrid=False, return_offsets=False, return_norm_vgrid=False, return_kv_feat=False, return_pos_encoding=False, return_attn=False, return_bias_only=False, return_orig_q=False):
         """
         b - batch
         h - heads
@@ -208,6 +208,9 @@ class DeformableAttention2DLocal(nn.Module):
         vgrid = grid + offsets
 
         vgrid_scaled = normalize_grid(vgrid)
+
+        #test
+        group_x = group(x)
 
         kv_feats = F.grid_sample(
             group(x),
@@ -284,7 +287,7 @@ class DeformableAttention2DLocal(nn.Module):
             return kv_feat_orig, vgrid_scaled, grid_x, grid_x_scaled, rel_pos_bias, sim_test2, pos_back, bias_back, bias_to, bias_from
 
         if return_kv_feat:
-            return kv_feat_orig, kv_feats, k_test, v_test, q_test, sim_test
+            return kv_feat_orig, group_x, vgrid_scaled, kv_feats, k_test, v_test, q_test, sim_test
 
         if return_norm_vgrid:
             return offsets, vgrid_scaled
@@ -295,4 +298,7 @@ class DeformableAttention2DLocal(nn.Module):
         if return_vgrid:
             return out, vgrid, orig_q, orig_x, grouped_queries
 
-        return out, orig_q, orig_x, grouped_queries
+        if return_orig_q:
+            return orig_q, grouped_queries
+
+        return out

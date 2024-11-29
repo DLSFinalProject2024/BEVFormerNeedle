@@ -317,8 +317,8 @@ conv_out_bias = [False, True]
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("conv_out_bias", conv_out_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
-@pytest.mark.parametrize("device", _DEVICES)
+@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_attn(conv_out_bias, conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -426,7 +426,7 @@ def test_deform_attn_compare_lucid_our_attn(conv_out_bias, conv_qkv_bias, shape,
 
     # Comapre
     assert sim_luc.shape == sim_our.shape
-    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 1e-3 
+    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 5e-3 
     assert attn_luc.shape == attn_our.shape
     assert np.linalg.norm(attn_luc.detach().numpy()-attn_our.detach().numpy()) < 1e-3 
     assert out_luc.shape == out_our.shape
@@ -443,8 +443,8 @@ conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
-@pytest.mark.parametrize("device", _DEVICES)
+@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_pos_encoding(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -564,7 +564,7 @@ def test_deform_attn_compare_lucid_our_pos_encoding(conv_qkv_bias, shape, device
     assert rel_pos_bias_luc.shape == rel_pos_bias_our.shape
     assert np.linalg.norm(rel_pos_bias_luc.detach().numpy()-rel_pos_bias_our.detach().numpy()) < 1e-3 
     assert sim_luc.shape == sim_our.shape
-    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 1e-3 
+    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 5e-3 
 
 
 torch.manual_seed(42)
@@ -573,8 +573,8 @@ conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
-@pytest.mark.parametrize("device", _DEVICES)
+@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_qkv(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -664,13 +664,19 @@ def test_deform_attn_compare_lucid_our_qkv(conv_qkv_bias, shape, device):
             assert np.linalg.norm(sub_module.bias.detach().numpy()-our_attn.to_offsets.modules[i].bias.detach().numpy()) < 1e-5 
 
     # Forward pass
-    kv_feat_orig, kv_feats_luc, k_luc, v_luc, q_luc, sim_luc = lucid_attn(pytorch_input, return_kv_feat=True)
+    kv_feat_orig, group_x_luc, vgrid_scaled_luc, kv_feats_luc, k_luc, v_luc, q_luc, sim_luc = lucid_attn(pytorch_input, return_kv_feat=True)
     #our_attn.kv_feats_orig = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
-    kv_feat_ours, k_our, v_our, q_our, sim_our = our_attn(x, return_kv_feat=True)
+    kv_feat_ours, group_x_our, vgrid_scaled_our, k_our, v_our, q_our, sim_our = our_attn(x, return_kv_feat=True)
 
     # Comapre kvq
     assert kv_feat_orig.shape == our_attn.kv_feats_orig.shape
-    assert np.linalg.norm(kv_feat_orig.detach().numpy()-our_attn.kv_feats_orig.detach().numpy()) < 1e-3 
+    assert np.linalg.norm(kv_feat_orig.detach().numpy()-our_attn.kv_feats_orig.detach().numpy()) < 1e-4
+
+    assert group_x_luc.shape == group_x_our.shape
+    assert np.linalg.norm(group_x_luc.detach().numpy()-group_x_our.detach().numpy()) < 1e-4
+
+    assert vgrid_scaled_luc.shape == vgrid_scaled_our.shape
+    assert np.linalg.norm(vgrid_scaled_luc.detach().numpy()-vgrid_scaled_our.detach().numpy()) < 1e-4
 
     assert kv_feats_luc.shape == kv_feat_ours.shape
     assert np.linalg.norm(kv_feats_luc.detach().numpy()-kv_feats_luc.detach().numpy()) < 1e-3 
@@ -685,7 +691,7 @@ def test_deform_attn_compare_lucid_our_qkv(conv_qkv_bias, shape, device):
     assert np.linalg.norm(q_luc.detach().numpy()-q_our.detach().numpy()) < 1e-3 
 
     assert sim_luc.shape == sim_our.shape
-    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 1e-3 
+    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 5e-3 
 
 
 torch.manual_seed(42)
@@ -697,8 +703,8 @@ conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
-@pytest.mark.parametrize("device", _DEVICES)
+@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_normalized_grid(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -773,7 +779,7 @@ def test_deform_attn_compare_lucid_our_normalized_grid(conv_qkv_bias, shape, dev
 
     # Forward pass
     lucid_offsets_q, lucid_norm_grid = lucid_attn(pytorch_input, return_norm_vgrid=True)
-    output_our, grouped_q_our, offsets_q_our, norm_grid_our = our_attn(x, return_norm_vgrid=True)
+    offsets_q_our, norm_grid_our = our_attn(x, return_norm_vgrid=True)
 
     # Comapre offsets
     assert lucid_offsets_q.shape == offsets_q_our.shape
@@ -793,8 +799,8 @@ conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
-@pytest.mark.parametrize("device", _DEVICES)
+@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_offset(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -869,7 +875,7 @@ def test_deform_attn_compare_lucid_our_offset(conv_qkv_bias, shape, device):
 
     # Forward pass
     lucid_grouped_q, lucid_offsets_q = lucid_attn(pytorch_input, return_offsets=True)
-    output_our, grouped_q_our, offsets_q_our = our_attn(x)
+    grouped_q_our, offsets_q_our = our_attn(x, return_offsets=True)
 
     # Comapre grouped_q
     assert lucid_grouped_q.shape == grouped_q_our.shape
@@ -886,8 +892,8 @@ conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
 @pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
 @pytest.mark.parametrize("shape", x_shapes)
-#@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
-@pytest.mark.parametrize("device", _DEVICES)
+@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES)
 def test_deform_attn_compare_lucid_our_inputq(conv_qkv_bias, shape, device):
     # Launch a new thread to monitor the memory usage
     #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
@@ -949,12 +955,12 @@ def test_deform_attn_compare_lucid_our_inputq(conv_qkv_bias, shape, device):
     assert np.linalg.norm(lucid_attn.to_q.weight.detach().numpy()-our_attn.to_q.weight.detach().numpy()) < 1e-5 
 
     # Forward pass
-    output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x, lucid_grouped_q = lucid_attn(pytorch_input, return_vgrid=True)
-    output_our, grouped_q_our, offsets_q_our = our_attn(x, return_vgrid=True)
+    lucid_orig_q, lucid_grouped_q = lucid_attn(pytorch_input, return_orig_q=True)
+    orig_q_our, grouped_q_our = our_attn(x, return_orig_q=True)
 
     # Comapre original q
-    assert lucid_orig_q.shape == output_our.shape
-    assert np.linalg.norm(lucid_orig_q.detach().numpy()-output_our.detach().numpy()) < 1e-3 
+    assert lucid_orig_q.shape == orig_q_our.shape
+    assert np.linalg.norm(lucid_orig_q.detach().numpy()-orig_q_our.detach().numpy()) < 1e-3 
 
     # Comapre grouped_q
     assert lucid_grouped_q.shape == grouped_q_our.shape

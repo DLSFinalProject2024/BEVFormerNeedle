@@ -211,6 +211,9 @@ class DeformableAttention(Module):
         self.to_v = ConvGp(self.dim, self.inner_dim, 1, groups = offset_groups if group_key_values else 1, bias = self.to_v_bias, device=self.device, dtype=self.dtype)
         self.to_out = ConvGp(self.inner_dim, self.dim, 1, bias=self.to_out_bias, device=self.device, dtype=self.dtype)
 
+        self.vgrid = None
+        self.vgrid_scaled = None
+
     def matmul(self, a, b_transpose):
         """
         batched matrix multiplication;
@@ -256,12 +259,13 @@ class DeformableAttention(Module):
     def forward(
         self,
         x,
-        return_vgrid=False,
+        return_orig_q=False,
         return_norm_vgrid=False,
+        return_offsets=False,
         return_kv_feat=False,
         return_pos_encoding=False,
         return_attn=False,
-        return_bias_only=False
+        return_bias_only=False,
     ):
         """
         The forward function of the Deformable Attention function.
@@ -274,6 +278,8 @@ class DeformableAttention(Module):
         # queries
         q = self.to_q(x) #(Bin, Cin, Hin, Win)
         _, _, h_q, w_q = q.shape
+        #test
+        orig_q = q
 
         # reshape queries into groups
         grouped_queries = q.reshape((Bin*self.offset_groups, self.offset_dims, h_q, w_q)) #(Bin*self.offset_groups, self.offset_dims, Hin, Win)
@@ -286,6 +292,8 @@ class DeformableAttention(Module):
         grid = ops.broadcast_to(grid, (offsets.shape[0], grid.shape[1], grid.shape[2], grid.shape[3]))#(Bin*self.offset_groups, 2, Hin/downsample_factor, Win/downsample_factor)
         vgrid = grid+offsets #(Bin*self.offset_groups, 2, Hin/downsample_factor, Win/downsample_factor)
         vgrid_scaled = normalize_grid(vgrid, dim=1, out_dim=3) #(Bin*self.offset_groups, Hin/downsample_factor, Win/downsample_factor, 2)
+        self.vgrid = vgrid
+        self.vgrid_scaled = vgrid_scaled
 
         grouped_x = x.reshape((Bin*self.offset_groups, self.offset_dims, Hin, Win)) #(Bin*self.offset_groups, self.offset_dims, Hin, Win)
         self.kv_feats_orig = ops.grid_sample(grouped_x, vgrid_scaled, mode='bilinear', padding_mode='zeros', align_corners=False)
@@ -341,12 +349,18 @@ class DeformableAttention(Module):
             return vgrid_scaled, grid_x, grid_x_scaled, rel_pos_bias, sim_rel_pos, pos_back, bias_back, bias_to, bias_from
 
         if return_kv_feat:
-            return kv_feat, k, v, q, sim
+            return kv_feat, grouped_x, vgrid_scaled, k, v, q, sim
 
         if return_norm_vgrid:
-            return q, grouped_queries, offsets, vgrid_scaled
+            return offsets, vgrid_scaled
 
-        return q, grouped_queries, offsets
+        if return_offsets:
+            return grouped_queries, offsets
+
+        if return_orig_q:
+            return orig_q, grouped_queries
+
+        return out, offsets, vgrid
 
 
 

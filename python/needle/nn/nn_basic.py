@@ -115,6 +115,24 @@ class Linear(Module):
 
     def forward(self, X: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
+        assert X.shape[-1] == self.in_features, f"Expected input shape ({X.shape[:-1]}, {self.in_features}), got {X.shape}"
+        # Added support to handle input with more than 2 dimensions
+        original_shape = X.shape
+        if len(original_shape) > 2:
+            dim1 = 1
+            for i in range(0, len(X.shape)-1):
+                dim1 *= X.shape[i]
+            X = X.reshape((dim1, self.in_features))
+        
+        y = X @ self.weight
+        if self.bias:
+            y += self.bias.broadcast_to(y.shape)
+        
+        if len(original_shape) > 2:
+            y = y.reshape((*original_shape[:-1], self.out_features))
+        
+        return y
+        '''
         out = ops.matmul(X, self.weight)
         #X_reshape = ops.reshape(X, (X.shape[0], -1))
         #out = ops.matmul(X_reshape, self.weight)
@@ -124,6 +142,7 @@ class Linear(Module):
             return out_res
         else:
             return out
+        '''
         ### END YOUR SOLUTION
 
 class Flatten(Module):

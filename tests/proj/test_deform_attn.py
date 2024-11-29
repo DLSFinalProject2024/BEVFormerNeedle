@@ -308,6 +308,131 @@ def copy_weights_and_biases(source_cpb, target_cpb, bias=True, plain_module=Fals
 
 torch.manual_seed(42)
 np.random.seed(42)
+x_shapes = [(128, 3, 32, 32)]
+conv_qkv_bias = [False, True]
+conv_out_bias = [False, True]
+#x_shapes = [(1, 512, 64, 64)] #will be Killed
+@pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
+@pytest.mark.parametrize("conv_out_bias", conv_out_bias)
+@pytest.mark.parametrize("shape", x_shapes)
+@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
+#@pytest.mark.parametrize("device", _DEVICES)
+def test_deform_attn_compare_lucid_our_attn_cifar10(conv_out_bias, conv_qkv_bias, shape, device):
+    # Launch a new thread to monitor the memory usage
+    #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
+    #monitor_thread.start()
+
+    # Lucidrains Deformable Attention Initialization
+    lucid_attn = DeformableAttention2DLocal(
+        dim=32,                        # Feature dimensions (C = 32)
+        dim_head=8,                    # Dimension per head
+        heads=4,                       # Attention heads
+        dropout=0.,                    # Dropout
+        downsample_factor=4,           # Downsample factor
+        offset_scale=4,                # Offset scale
+        offset_groups=2,              # No offset groups
+        offset_kernel_size=5,           # Offset kernel size
+        group_queries=True,
+        group_key_values=True,
+        conv_qkv_bias=conv_qkv_bias,
+        conv_out_bias=conv_out_bias
+    )
+
+    # Ours Deformable Attention Initialization
+    our_attn = ndl.nn.DeformableAttention(
+        dim=32,                        # Feature dimensions (C = 32)
+        dim_head=8,                    # Dimension per head
+        heads=4,                       # Attention heads
+        dropout=0.,                    # Dropout
+        downsample_factor=4,           # Downsample factor
+        offset_scale=4,                # Offset scale
+        offset_groups=2,              # No offset groups
+        offset_kernel_size=5,           # Offset kernel size
+        group_queries=True,
+        group_key_values=True,
+        to_q_bias = conv_qkv_bias,
+        to_k_bias = conv_qkv_bias,
+        to_v_bias = conv_qkv_bias,
+        to_out_bias = conv_out_bias,
+        device=device,
+        dtype='float32'
+    )
+    conv_preprocess = ndl.nn.ConvGp(3, 32, 3, groups = 1, bias=True, device=device, dtype='float32')
+
+    batch_size = shape[0]
+    channels   = shape[1]
+    height     = shape[2]
+    width      = shape[3]
+
+    x = ndl.init.rand(*(batch_size, channels, height, width), device=device, dtype='float32', requires_grad=True)
+    x = conv_preprocess(x) #(B, C=32, H, W)
+    pytorch_input = torch.tensor(x.cached_data.numpy())
+
+    # (Optional) Copy biases if needed
+    if conv_qkv_bias is True:
+        lucid_attn.to_q.bias.data = torch.tensor(our_attn.to_q.bias.cached_data.numpy())
+        assert lucid_attn.to_q.bias.shape == our_attn.to_q.bias.shape
+        assert np.linalg.norm(lucid_attn.to_q.bias.detach().numpy()-our_attn.to_q.bias.detach().numpy()) < 1e-5 
+
+        lucid_attn.to_k.bias.data = torch.tensor(our_attn.to_k.bias.cached_data.numpy())
+        assert lucid_attn.to_k.bias.shape == our_attn.to_k.bias.shape
+        assert np.linalg.norm(lucid_attn.to_k.bias.detach().numpy()-our_attn.to_k.bias.detach().numpy()) < 1e-5 
+
+        lucid_attn.to_v.bias.data = torch.tensor(our_attn.to_v.bias.cached_data.numpy())
+        assert lucid_attn.to_v.bias.shape == our_attn.to_v.bias.shape
+        assert np.linalg.norm(lucid_attn.to_v.bias.detach().numpy()-our_attn.to_v.bias.detach().numpy()) < 1e-5 
+
+    if conv_out_bias is True:
+        lucid_attn.to_out.bias.data = torch.tensor(our_attn.to_out.bias.cached_data.numpy())
+        assert lucid_attn.to_out.bias.shape == our_attn.to_out.bias.shape
+        assert np.linalg.norm(lucid_attn.to_out.bias.detach().numpy()-our_attn.to_out.bias.detach().numpy()) < 1e-5 
+
+    # Copy weights
+    lucid_attn.to_q.weight.data = torch.tensor(our_attn.to_q.weight.cached_data.numpy())
+    assert lucid_attn.to_q.weight.shape == our_attn.to_q.weight.shape
+    assert np.linalg.norm(lucid_attn.to_q.weight.detach().numpy()-our_attn.to_q.weight.detach().numpy()) < 1e-5 
+
+    lucid_attn.to_k.weight.data = torch.tensor(our_attn.to_k.weight.cached_data.numpy())
+    assert lucid_attn.to_k.weight.shape == our_attn.to_k.weight.shape
+    assert np.linalg.norm(lucid_attn.to_k.weight.detach().numpy()-our_attn.to_k.weight.detach().numpy()) < 1e-5 
+
+    lucid_attn.to_v.weight.data = torch.tensor(our_attn.to_v.weight.cached_data.numpy())
+    assert lucid_attn.to_v.weight.shape == our_attn.to_v.weight.shape
+    assert np.linalg.norm(lucid_attn.to_v.weight.detach().numpy()-our_attn.to_v.weight.detach().numpy()) < 1e-5 
+
+    lucid_attn.to_out.weight.data = torch.tensor(our_attn.to_out.weight.cached_data.numpy())
+    assert lucid_attn.to_out.weight.shape == our_attn.to_out.weight.shape
+    assert np.linalg.norm(lucid_attn.to_out.weight.detach().numpy()-our_attn.to_out.weight.detach().numpy()) < 1e-5 
+
+    # Copy offset network weights, for offset network layer0 and layer2 (ConvGp)
+    for i in [0, 2]:
+        sub_module = lucid_attn.to_offsets[i]
+        sub_module.weight.data = torch.tensor(our_attn.to_offsets.modules[i].weight.cached_data.numpy())
+        assert sub_module.weight.shape == our_attn.to_offsets.modules[i].weight.shape
+        assert np.linalg.norm(sub_module.weight.detach().numpy()-our_attn.to_offsets.modules[i].weight.detach().numpy()) < 1e-5 
+
+        if i == 0:
+            sub_module.bias.data = torch.tensor(our_attn.to_offsets.modules[i].bias.cached_data.numpy())
+            assert sub_module.bias.shape == our_attn.to_offsets.modules[i].bias.shape
+            assert np.linalg.norm(sub_module.bias.detach().numpy()-our_attn.to_offsets.modules[i].bias.detach().numpy()) < 1e-5 
+
+    # Copy weights and bias of Linear() in CPB
+    copy_weights_and_biases(our_attn.rel_pos_bias, lucid_attn.rel_pos_bias)
+
+    # Forward pass
+    kv_feat_orig, sim_luc, attn_luc, out_luc = lucid_attn(pytorch_input, return_attn=True)
+    #our_attn.kv_feats_from_luc = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
+    sim_our, attn_our, out_our = our_attn(x, return_attn=True)
+
+    # Comapre
+    assert attn_luc.shape == attn_our.shape
+    assert np.linalg.norm(attn_luc.detach().numpy()-attn_our.detach().numpy()) < 1e-3 
+    assert out_luc.shape == out_our.shape
+    assert np.linalg.norm(out_luc.detach().numpy()-out_our.detach().numpy()) < 2e-3 
+
+
+torch.manual_seed(42)
+np.random.seed(42)
 x_shapes = [(1, 32, 64, 64),
             (4, 32, 32, 32),
             (8, 32, 16, 16)]
@@ -421,7 +546,7 @@ def test_deform_attn_compare_lucid_our_attn(conv_out_bias, conv_qkv_bias, shape,
 
     # Forward pass
     kv_feat_orig, sim_luc, attn_luc, out_luc = lucid_attn(pytorch_input, return_attn=True)
-    our_attn.kv_feats_from_luc = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
+    #our_attn.kv_feats_from_luc = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
     sim_our, attn_our, out_our = our_attn(x, return_attn=True)
 
     # Comapre
@@ -540,7 +665,7 @@ def test_deform_attn_compare_lucid_our_pos_encoding(conv_qkv_bias, shape, device
     # Forward pass
     kv_feat_orig, vgrid_scaled_luc, grid_x_luc, grid_x_scaled_luc, rel_pos_bias_luc, sim_luc, pos_back_luc, bias_back_luc, bias_to_luc, bias_from_luc = lucid_attn(pytorch_input, return_pos_encoding=True)
     #kv_feat_orig, pos_back_luc, bias_back_luc, bias_to_luc, bias_from_luc = lucid_attn(pytorch_input, return_pos_encoding=True, return_bias_only=True)
-    our_attn.kv_feats_from_luc = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
+    #our_attn.kv_feats_from_luc = ndl.Tensor(kv_feat_orig.data.numpy(), device=device, dtype='float32', requires_grad=False)
     vgrid_scaled_our, grid_x_our, grid_x_scaled_our, rel_pos_bias_our, sim_our, pos_back_our, bias_back_our, bias_to_our, bias_from_our = our_attn(x, return_pos_encoding=True)
     #pos_back_our, bias_back_our, bias_to_our, bias_from_our = our_attn(x, return_pos_encoding=True, return_bias_only=True)
 

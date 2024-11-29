@@ -109,3 +109,5 @@ class DataLoader:
         return tuple(final_output)
         ### END YOUR SOLUTION
 
+    def __len__(self):
+        return len(self.ordering)

@@ -2,6 +2,7 @@ import needle.nn as nn
 import needle.ops as ops
 from needle.autograd import Tensor
 import needle.init as init
+import math
 # import numpy as np
 
 
@@ -203,6 +204,8 @@ class VisionTransformer(nn.Module):
         #x = self.conv_preprocess(x) #(batch, c=16, image_size, image_size)
         #x, offsets, vgrid = self.dattn(x) #(batch, c=16, image_size, image_size)
         #x = self.conv_postprocess(x) #(batch, c=3, image_size, image_size)
+        #print(f"len(self.dattn.parmeters) = {sum([math.prod(each_w.shape) for each_w in self.dattn.fn.modules[1].parameters()])}")
+        #print(f"len(self.attn.parmeters) = {sum(math.prod(each_w.shape) for each_w in self.transformer_blocks.modules[0].layer1.modules[0].parameters())}")
         x = self.dattn(x) #(batch, c=8, image_size, image_size)
 
         x = self.patch_embed(x)  # (batch, num_patches, embed_dim)

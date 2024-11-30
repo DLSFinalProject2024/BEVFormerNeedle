@@ -10,6 +10,7 @@ sys.path.append("./")
 from apps.models import ResNet9
 from apps.simple_ml import train_cifar10, evaluate_cifar10
 from needle.data import DataLoader, CIFAR10Dataset
+import math
 
 
 if __name__ == "__main__":
@@ -40,6 +41,10 @@ if __name__ == "__main__":
         dropout=0.1,
         device=device,
     )
+
+    print(f"len(self.dattn.parmeters) = {sum([math.prod(each_w.shape) for each_w in model.dattn.fn.modules[1].parameters()])}")
+    print(f"len(self.attn.parmeters) = {sum(math.prod(each_w.shape) for each_w in model.transformer_blocks.modules[0].layer1.modules[0].parameters())}")
+    print(f"len(self.dattn_model.parmeters) = {sum(math.prod(each_w.shape) for each_w in model.parameters())}")
 
     # Train the model
     train_cifar10(model, train_loader, n_epochs=10, optimizer=ndl.optim.Adam, lr=0.001, weight_decay=0.001)

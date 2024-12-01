@@ -31,7 +31,7 @@ if __name__ == "__main__":
     model = nn.VisionTransformer(
         img_size=(32, 32),
         patch_size=4,
-        in_channels=3,
+        in_channels=16,
         num_classes=10,
         embed_dim=64,
         num_blocks=1,
@@ -42,7 +42,8 @@ if __name__ == "__main__":
         device=device,
     )
 
-    print(f"len(self.dattn.parmeters) = {sum([math.prod(each_w.shape) for each_w in model.dattn.fn.modules[1].parameters()])}")
+    #print(f"len(self.dattn.parmeters) = {sum([math.prod(each_w.shape) for each_w in model.dattn.fn.modules[1].parameters()])}")
+    print(f"len(self.dattn.parmeters) = {sum([math.prod(each_w.shape) for each_w in model.dattn.fn.modules[0].parameters()])}")
     print(f"len(self.attn.parmeters) = {sum(math.prod(each_w.shape) for each_w in model.transformer_blocks.modules[0].layer1.modules[0].parameters())}")
     print(f"len(self.dattn_model.parmeters) = {sum(math.prod(each_w.shape) for each_w in model.parameters())}")
 

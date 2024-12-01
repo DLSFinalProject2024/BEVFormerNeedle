@@ -169,13 +169,42 @@ class VisionTransformer(nn.Module):
         self.conv_preprocess = nn.Conv(3, 16, 3, stride=1, bias=False, device=device, dtype=dtype)
         self.conv_postprocess = nn.Conv(16, 3, 3, stride=1, bias=False, device=device, dtype=dtype)
         '''
+        '''
         self.dattn = nn.Residual(
             nn.Sequential(
-                nn.Conv(3, 8, 3, stride=1, bias=False, device=device, dtype=dtype),
+                nn.Conv(3, 16, 3, stride=1, bias=False, device=device, dtype=dtype),
                 nn.DeformableAttention(
-                    dim=8,                         # Feature dimensions
+                    dim=16,                         # Feature dimensions
                     dim_head=4,                    # Dimension per head
-                    heads=2,                       # Attention heads
+                    heads=4,                       # Attention heads
+                    dropout=0.,                    # Dropout
+                    downsample_factor=4,           # Downsample factor
+                    offset_scale=4,                # Offset scale
+                    offset_groups=4,               # Offset groups
+                    offset_kernel_size=5,          # Offset kernel size
+                    group_queries=True,
+                    group_key_values=True,
+                    to_q_bias = True,
+                    to_k_bias = True,
+                    to_v_bias = True,
+                    to_out_bias = True,
+                    device=device,
+                    dtype='float32',
+                    return_out_only=True
+                ),
+                nn.Conv(16, 3, 3, stride=1, bias=False, device=device, dtype=dtype)
+            )
+        )
+        '''
+
+        self.preproc = nn.Conv(3, 16, 3, stride=1, bias=True, device=device, dtype=dtype)
+        self.dattn = nn.Residual(
+            nn.Sequential(
+                #nn.Conv(16, 16, 3, stride=1, bias=False, device=device, dtype=dtype),
+                nn.DeformableAttention(
+                    dim=16,                         # Feature dimensions
+                    dim_head=4,                    # Dimension per head
+                    heads=4,                       # Attention heads
                     dropout=0.,                    # Dropout
                     downsample_factor=4,           # Downsample factor
                     offset_scale=4,                # Offset scale
@@ -190,8 +219,7 @@ class VisionTransformer(nn.Module):
                     device=device,
                     dtype='float32',
                     return_out_only=True
-                ),
-                nn.Conv(8, 3, 3, stride=1, bias=False, device=device, dtype=dtype)
+                )
             )
         )
 
@@ -204,9 +232,9 @@ class VisionTransformer(nn.Module):
         #x = self.conv_preprocess(x) #(batch, c=16, image_size, image_size)
         #x, offsets, vgrid = self.dattn(x) #(batch, c=16, image_size, image_size)
         #x = self.conv_postprocess(x) #(batch, c=3, image_size, image_size)
-        #print(f"len(self.dattn.parmeters) = {sum([math.prod(each_w.shape) for each_w in self.dattn.fn.modules[1].parameters()])}")
-        #print(f"len(self.attn.parmeters) = {sum(math.prod(each_w.shape) for each_w in self.transformer_blocks.modules[0].layer1.modules[0].parameters())}")
-        x = self.dattn(x) #(batch, c=8, image_size, image_size)
+
+        x = self.preproc(x) #(batch, c=dim, image_size, image_size)
+        x = self.dattn(x) #(batch, c=dim, image_size, image_size)
 
         x = self.patch_embed(x)  # (batch, num_patches, embed_dim)
         batch_size, num_patches, embed_dim = x.shape

@@ -27,11 +27,12 @@ if __name__ == "__main__":
 
     #device = ndl.cuda() if ndl.cuda().enabled() else ndl.cpu()
     device = ndl.cpu()
-    # Define Vision Transformer model
-    model = nn.VisionTransformer(
+    in_channels = 8
+    # Define Deformable Vision Transformer model
+    dattn_model = nn.VisionTransformer(
         img_size=(32, 32),
         patch_size=4,
-        in_channels=16,
+        in_channels=in_channels,
         num_classes=10,
         embed_dim=64,
         num_blocks=1,
@@ -40,15 +41,19 @@ if __name__ == "__main__":
         mlp_hidden_dim=128,
         dropout=0.1,
         device=device,
+        deform_attn_activate=True,
+        dattn_dim_head=4, 
+        dattn_heads=2, 
+        dattn_offset_groups=2
     )
 
-    #print(f"len(self.dattn.parmeters) = {sum([math.prod(each_w.shape) for each_w in model.dattn.fn.modules[1].parameters()])}")
-    print(f"len(self.dattn.parmeters) = {sum([math.prod(each_w.shape) for each_w in model.dattn.fn.modules[0].parameters()])}")
-    print(f"len(self.attn.parmeters) = {sum(math.prod(each_w.shape) for each_w in model.transformer_blocks.modules[0].layer1.modules[0].parameters())}")
-    print(f"len(self.dattn_model.parmeters) = {sum(math.prod(each_w.shape) for each_w in model.parameters())}")
+    print(f"in_channels = {in_channels}")
+    print(f"len(self.attn.parmeters) = {sum(math.prod(each_w.shape) for each_w in dattn_model.transformer_blocks.modules[0].layer1.modules[0].parameters())}")
+    print(f"len(self.dattn.parmeters) = {sum([math.prod(each_w.shape) for each_w in dattn_model.dattn.fn.modules[0].parameters()])}")
+    print(f"len(self.dattn_model.parmeters) = {sum(math.prod(each_w.shape) for each_w in dattn_model.parameters())}")
 
     # Train the model
-    train_cifar10(model, train_loader, n_epochs=10, optimizer=ndl.optim.Adam, lr=0.001, weight_decay=0.001)
+    train_cifar10(dattn_model, train_loader, n_epochs=10, optimizer=ndl.optim.Adam, lr=0.001, weight_decay=0.001)
 
     # Evaluate the model
-    evaluate_cifar10(model, test_loader)
+    evaluate_cifar10(dattn_model, test_loader)

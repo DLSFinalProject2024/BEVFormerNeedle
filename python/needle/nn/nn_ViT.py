@@ -118,6 +118,7 @@ class VisionTransformer(nn.Module):
     def __init__(
         self, img_size=[224, 224], patch_size=16, in_channels=3, num_classes=1000, embed_dim=768, num_blocks=6,
         num_heads=12, dim_head=128, mlp_hidden_dim=3072, dropout=0.1, device=None, dtype="float32",
+        deform_attn_activate=False, dattn_dim_head=1, dattn_heads=1, dattn_offset_groups=1
     ):
         super().__init__()
         self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim, device, dtype)
@@ -130,6 +131,7 @@ class VisionTransformer(nn.Module):
         # (1, 197, 768)
         self.positional_embedding = nn.Parameter(init.zeros(1, self.num_patches + 1, embed_dim, device=device, dtype=dtype))
         self.positional_dropout = nn.Dropout(dropout)
+        self.deform_attn_activate = deform_attn_activate
 
         self.transformer_blocks = nn.Sequential(
             *[VisionTransformerBlock(
@@ -197,31 +199,32 @@ class VisionTransformer(nn.Module):
         )
         '''
 
-        self.preproc = nn.Conv(3, 16, 3, stride=1, bias=True, device=device, dtype=dtype)
-        self.dattn = nn.Residual(
-            nn.Sequential(
-                #nn.Conv(16, 16, 3, stride=1, bias=False, device=device, dtype=dtype),
-                nn.DeformableAttention(
-                    dim=16,                         # Feature dimensions
-                    dim_head=4,                    # Dimension per head
-                    heads=4,                       # Attention heads
-                    dropout=0.,                    # Dropout
-                    downsample_factor=4,           # Downsample factor
-                    offset_scale=4,                # Offset scale
-                    offset_groups=2,               # Offset groups
-                    offset_kernel_size=5,          # Offset kernel size
-                    group_queries=True,
-                    group_key_values=True,
-                    to_q_bias = True,
-                    to_k_bias = True,
-                    to_v_bias = True,
-                    to_out_bias = True,
-                    device=device,
-                    dtype='float32',
-                    return_out_only=True
+        if self.deform_attn_activate:
+            self.preproc = nn.Conv(3, in_channels, 3, stride=1, bias=True, device=device, dtype=dtype)
+            self.dattn = nn.Residual(
+                nn.Sequential(
+                    #nn.Conv(16, 16, 3, stride=1, bias=False, device=device, dtype=dtype),
+                    nn.DeformableAttention(
+                        dim=in_channels,                   # Feature dimensions
+                        dim_head=dattn_dim_head,                 # Dimension per head
+                        heads=dattn_heads,                       # Attention heads
+                        dropout=0.,                        # Dropout
+                        downsample_factor=4,           # Downsample factor
+                        offset_scale=4,                # Offset scale
+                        offset_groups=dattn_offset_groups,   # Offset groups
+                        offset_kernel_size=5,          # Offset kernel size
+                        group_queries=True,
+                        group_key_values=True,
+                        to_q_bias = True,
+                        to_k_bias = True,
+                        to_v_bias = True,
+                        to_out_bias = True,
+                        device=device,
+                        dtype='float32',
+                        return_out_only=True
+                    )
                 )
             )
-        )
 
 
     def forward(self, x):
@@ -229,12 +232,9 @@ class VisionTransformer(nn.Module):
         Input: (batch, in_channels, img_size, img_size)
         Output: (batch, num_classes)
         """
-        #x = self.conv_preprocess(x) #(batch, c=16, image_size, image_size)
-        #x, offsets, vgrid = self.dattn(x) #(batch, c=16, image_size, image_size)
-        #x = self.conv_postprocess(x) #(batch, c=3, image_size, image_size)
-
-        x = self.preproc(x) #(batch, c=dim, image_size, image_size)
-        x = self.dattn(x) #(batch, c=dim, image_size, image_size)
+        if self.deform_attn_activate:
+            x = self.preproc(x) #(batch, c=dim, image_size, image_size)
+            x = self.dattn(x) #(batch, c=dim, image_size, image_size)
 
         x = self.patch_embed(x)  # (batch, num_patches, embed_dim)
         batch_size, num_patches, embed_dim = x.shape

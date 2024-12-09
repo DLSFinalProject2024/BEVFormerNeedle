@@ -231,12 +231,16 @@ def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
     ### BEGIN YOUR SOLUTION
     
     opt = optimizer(model.parameters(), lr=lr, weight_decay=weight_decay)
+    avg_acc_list = []
+    avg_loss_list = []
 
     for epoch in range(n_epochs):
         avg_acc, avg_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn(), opt=opt)
         print(f"Training, Epoch {epoch+1}: avg_acc={avg_acc:.3f}, avg_loss={avg_loss:.3f}")
+        avg_acc_list.append(avg_acc)
+        avg_loss_list.append(avg_loss)
 
-    return avg_acc, avg_loss
+    return avg_acc_list, avg_loss_list
     ### END YOUR SOLUTION
 
 

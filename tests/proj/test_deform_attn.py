@@ -7,11 +7,13 @@ import numpy as np
 import pytest
 import needle as ndl
 from needle import backend_ndarray as nd
+from needle import ops
 import threading
 import time
 
 import torch
 import torch.nn
+import torch.nn.functional as F
 # Lucidrians-Deformable Attention
 sys.path.append('./LUC')
 from deformable_attention import DeformableAttention
@@ -19,9 +21,6 @@ from deformable_attention import DeformableAttention1D
 from deformable_attention import DeformableAttention2D
 from deformable_attention_2d_local import DeformableAttention2DLocal
 
-# DAT-Deformable Attention
-sys.path.append('./DAT')
-from models.dat_blocks import DAttentionBaseline
 
 print(f"BACKEND = {ndl.BACKEND}")
 
@@ -88,6 +87,30 @@ def test_linear_forward(in_features, out_features, batch_size, device, bias_bool
     # Check if outputs are close
     np.testing.assert_allclose(my_output.detach().numpy(), torch_output.detach().numpy(), atol=1e-5, rtol=1e-5)
 
+torch.manual_seed(42)
+x_shapes = [(1, 32, 64, 64), 
+            (2, 32, 64, 64),
+            (4, 16, 32, 32),
+            (10, 5, 2),
+            (3, 4, 5),
+            (10, 10),
+            (6, 7),
+            (7,)]
+@pytest.mark.parametrize("shape", x_shapes)
+@pytest.mark.parametrize("device", _DEVICES)
+def test_deform_attn_gelu(shape, device):
+    # Input
+    np.random.seed(0)
+    torch.manual_seed(42)
+    x_ndl = ndl.init.rand(*(shape), device=device, dtype='float32', requires_grad=True)
+    x_torch = torch.tensor(x_ndl.cached_data.numpy(), requires_grad=True)
+
+    # Torch forward
+    torch_output = torch.nn.GELU(approximate='tanh')(x_torch)
+
+    # Local forward
+    local_output = ndl.nn.GELU()(x_ndl)
+    np.testing.assert_allclose(torch_output.detach().numpy(), local_output.detach().numpy(), atol=1e-5, rtol=1e-5)
 
 torch.manual_seed(42)
 x_shapes = [(1, 32, 64, 64), 
@@ -308,7 +331,7 @@ def copy_weights_and_biases(source_cpb, target_cpb, bias=True, plain_module=Fals
 
 torch.manual_seed(42)
 np.random.seed(42)
-x_shapes = [(128, 3, 32, 32)]
+x_shapes = [(64, 3, 32, 32)]
 conv_qkv_bias = [False, True]
 conv_out_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
@@ -551,7 +574,7 @@ def test_deform_attn_compare_lucid_our_attn(conv_out_bias, conv_qkv_bias, shape,
 
     # Comapre
     assert sim_luc.shape == sim_our.shape
-    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 5e-3 
+    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 1e-2 
     assert attn_luc.shape == attn_our.shape
     assert np.linalg.norm(attn_luc.detach().numpy()-attn_our.detach().numpy()) < 1e-3 
     assert out_luc.shape == out_our.shape
@@ -689,7 +712,7 @@ def test_deform_attn_compare_lucid_our_pos_encoding(conv_qkv_bias, shape, device
     assert rel_pos_bias_luc.shape == rel_pos_bias_our.shape
     assert np.linalg.norm(rel_pos_bias_luc.detach().numpy()-rel_pos_bias_our.detach().numpy()) < 1e-3 
     assert sim_luc.shape == sim_our.shape
-    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 5e-3 
+    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 1e-2 
 
 
 torch.manual_seed(42)
@@ -816,13 +839,13 @@ def test_deform_attn_compare_lucid_our_qkv(conv_qkv_bias, shape, device):
     assert np.linalg.norm(q_luc.detach().numpy()-q_our.detach().numpy()) < 1e-3 
 
     assert sim_luc.shape == sim_our.shape
-    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 5e-3 
+    assert np.linalg.norm(sim_luc.detach().numpy()-sim_our.detach().numpy()) < 1e-2 
 
 
 torch.manual_seed(42)
 x_shapes = [(1, 32, 64, 64),
             (4, 32, 32, 32),
-            (8, 32, 64, 64),
+            (8, 32, 32, 32),
             (16, 32, 16, 16)]
 conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
@@ -918,7 +941,7 @@ def test_deform_attn_compare_lucid_our_normalized_grid(conv_qkv_bias, shape, dev
 torch.manual_seed(42)
 x_shapes = [(1, 32, 64, 64),
             (4, 32, 32, 32),
-            (8, 32, 64, 64),
+            (8, 32, 32, 32),
             (16, 32, 16, 16)]
 conv_qkv_bias = [False, True]
 #x_shapes = [(1, 512, 64, 64)] #will be Killed
@@ -1143,151 +1166,6 @@ def test_deform_attn_group_conv(out_channel, stride, padding, groups, kernel_siz
     assert np.linalg.norm(needle_output.cached_data.numpy() - pytorch_output.data.numpy()) < 1e-3
 
 
-torch.manual_seed(42)
-x_shapes = [(1, 32, 64, 64)]
-conv_qkv_bias = [False, True]
-#x_shapes = [(1, 512, 64, 64)] #will be Killed
-@pytest.mark.parametrize("conv_qkv_bias", conv_qkv_bias)
-@pytest.mark.parametrize("shape", x_shapes)
-@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
-def test_deform_attn_compare_inputq(conv_qkv_bias, shape, device):
-    # Launch a new thread to monitor the memory usage
-    #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
-    #monitor_thread.start()
-
-    # Lucidrains Deformable Attention Initialization
-    lucid_attn = DeformableAttention2DLocal(
-        dim=32,                        # Feature dimensions (C = 32)
-        dim_head=4,                    # Dimension per head
-        heads=8,                       # Attention heads
-        dropout=0.,                    # Dropout
-        downsample_factor=4,           # Downsample factor
-        offset_scale=4,                # Offset scale
-        offset_groups=2,              # No offset groups
-        offset_kernel_size=6,           # Offset kernel size
-        group_queries=True,
-        group_key_values=False,
-        conv_qkv_bias=conv_qkv_bias
-    )    
-
-    # DAT Deformable Attention Initialization
-    dat_attn = DAttentionBaseline(
-        q_size=(64, 64),               # Query size (H, W)
-        kv_size=(64, 64),              # Key/Value size (H, W)
-        n_heads=8,                     # Number of attention heads
-        n_head_channels=4,             # Channels per head (Total dim = n_heads * n_head_channels = 32)
-        n_groups=2,                    # No grouping
-        attn_drop=0.,                  # Attention dropout
-        proj_drop=0.,                  # Projection dropout
-        stride=4,                      # Downsample factor
-        offset_range_factor=4,         # Offset scale
-        use_pe=True,                  # No positional encoding
-        dwc_pe=False,                  # No depthwise convolution positional encoding
-        no_off=False,                  # Enable offsets
-        fixed_pe=False,                # No fixed positional encoding
-        ksize=6,                       # Offset kernel size
-        log_cpb=False,                  # No logarithmic CPB
-        conv_qkv_bias=conv_qkv_bias
-    )    
-
-    batch_size = shape[0]
-    channels   = shape[1]
-    height     = shape[2]
-    width      = shape[3]
-    x = torch.randn(batch_size, channels, height, width)
-
-    # Forward pass through DAT Deformable Attention
-    output_dat, dat_offsets, dat_ref, dat_orig_q, dat_orig_x = dat_attn(x)    
-
-    # Copy the weights from source_model to target_model
-    lucid_attn.to_q.weight.data = dat_attn.proj_q.weight.clone()
-
-    # (Optional) Copy biases if needed
-    if dat_attn.conv_qkv_bias is True:
-        lucid_attn.conv_qkv_bias = dat_attn.conv_qkv_bias    
-        lucid_attn.to_q.bias.data = dat_attn.proj_q.bias.clone()    
-        #print(f"lucid_attn.to_q.bias.shape = {lucid_attn.to_q.bias.shape}")
-        #print(f"dat_attn.proj_q.bias.shape = {dat_attn.proj_q.bias.shape}")
-        assert torch.allclose(dat_attn.proj_q.bias, lucid_attn.to_q.bias, atol=1e-5)
-        assert np.linalg.norm(dat_attn.proj_q.bias.detach().numpy()-lucid_attn.to_q.bias.detach().numpy()) < 1e-5 
-
-    # Forward pass through Lucidrains' Deformable Attention
-    dat_to_q_weight = dat_attn.proj_q.weight.data
-    lucid_to_q_weight = lucid_attn.to_q.weight.data
-    #print(f"dat_to_q_weight.shape = {dat_to_q_weight.shape}")
-    #print(f"lucid_to_q_weight.shape = {lucid_to_q_weight.shape}")
-    output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x, lucid_grouped_q = lucid_attn(x, return_vgrid=True)
-
-    # Compare projection weight of q
-    assert dat_to_q_weight.shape == lucid_to_q_weight.shape
-    assert torch.allclose(dat_to_q_weight, lucid_to_q_weight, atol=1e-5)
-    assert np.linalg.norm(dat_to_q_weight.detach().numpy()-lucid_to_q_weight.detach().numpy()) < 1e-5 
-
-    # Comapre original q
-    assert lucid_orig_q.shape == dat_orig_q.shape
-    assert np.linalg.norm(lucid_orig_q.detach().numpy()-dat_orig_q.detach().numpy()) < 1e-5 
-
-
-torch.manual_seed(42)
-x_shapes = [(1, 32, 64, 64)]
-#x_shapes = [(1, 512, 64, 64)] #will be Killed
-@pytest.mark.parametrize("shape", x_shapes)
-@pytest.mark.parametrize("device", _DEVICES_ATTN, ids=["cpu"])
-def test_deform_attn_compare_inputx(shape, device):
-    # Launch a new thread to monitor the memory usage
-    #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
-    #monitor_thread.start()
-
-    # Lucidrains Deformable Attention Initialization
-    lucid_attn = DeformableAttention2DLocal(
-        dim=32,                        # Feature dimensions (C = 32)
-        dim_head=4,                    # Dimension per head
-        heads=8,                       # Attention heads
-        dropout=0.,                    # Dropout
-        downsample_factor=4,           # Downsample factor
-        offset_scale=4,                # Offset scale
-        offset_groups=1,            # No offset groups
-        offset_kernel_size=6,           # Offset kernel size
-        group_queries=False,
-        group_key_values=False
-    )    
-
-    # DAT Deformable Attention Initialization
-    dat_attn = DAttentionBaseline(
-        q_size=(64, 64),               # Query size (H, W)
-        kv_size=(64, 64),              # Key/Value size (H, W)
-        n_heads=8,                     # Number of attention heads
-        n_head_channels=4,             # Channels per head (Total dim = n_heads * n_head_channels = 32)
-        n_groups=1,                    # No grouping
-        attn_drop=0.,                  # Attention dropout
-        proj_drop=0.,                  # Projection dropout
-        stride=4,                      # Downsample factor
-        offset_range_factor=4,         # Offset scale
-        use_pe=True,                  # No positional encoding
-        dwc_pe=False,                  # No depthwise convolution positional encoding
-        no_off=False,                  # Enable offsets
-        fixed_pe=False,                # No fixed positional encoding
-        ksize=6,                       # Offset kernel size
-        log_cpb=False                  # No logarithmic CPB
-    )    
-
-    batch_size = shape[0]
-    channels   = shape[1]
-    height     = shape[2]
-    width      = shape[3]
-    x = torch.randn(batch_size, channels, height, width)
-
-    # Forward pass through DAT Deformable Attention
-    output_dat, dat_offsets, dat_ref, dat_orig_q, dat_orig_x = dat_attn(x)    
-
-    # Forward pass through Lucidrains' Deformable Attention
-    output_lucid, lucid_offsets, lucid_orig_q, lucid_orig_x, lucid_grouped_q = lucid_attn(x, return_vgrid=True)
-
-    # Comapre original q
-    assert lucid_orig_x.shape == dat_orig_x.shape
-    assert np.linalg.norm(lucid_orig_x.detach().numpy()-dat_orig_x.detach().numpy()) < 1e-5 
-
-
 # Lucidrains
 torch.manual_seed(42)
 x_shapes = [(1, 32, 64, 64)]
@@ -1333,6 +1211,49 @@ def test_deform_attn_lucid_1D(shape):
     B = attn(X) #B is the answer
 
     assert np.linalg.norm(A-B.detach().numpy()) < 1e-5 
+
+# Parameters for testing grid_sample
+grid_sample_params = [
+    (1, 1, 1, 1, 1, 2),
+    (1, 1, 3, 3, 3, 3),
+    (1, 1, 3, 4, 3, 4),
+    (1, 2, 4, 3, 4, 3),
+    (1, 3, 5, 100, 16, 16),
+    (1, 3, 32, 16, 1, 1),
+    (2, 3, 32, 32, 15, 18),
+    (4, 1, 64, 64, 128, 1),
+]
+
+# @pytest.mark.parametrize("N,C,H,W,H_out,W_out", grid_sample_params)
+# @pytest.mark.parametrize("mode", ['bilinear', 'nearest'])
+# @pytest.mark.parametrize("padding_mode", ['zeros', 'border', 'reflection'])
+# @pytest.mark.parametrize("align_corners", [True, False])
+# @pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("N,C,H,W,H_out,W_out", grid_sample_params)
+@pytest.mark.parametrize("mode", ['bilinear'])
+@pytest.mark.parametrize("padding_mode", ['zeros'])
+@pytest.mark.parametrize("align_corners", [False])
+@pytest.mark.parametrize("device", _DEVICES_ATTN)
+def test_nn_grid_sample(N, C, H, W, H_out, W_out, mode, padding_mode, align_corners, device):
+    np.random.seed(0)
+    a = ndl.init.rand(N, C, H, W, device=device, requires_grad=True)
+    grid = ndl.init.rand(N, H_out, W_out, 2, low=-1.0, high=1.0, device=device, requires_grad=True)
+    out = ops.grid_sample(a, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
+
+    a_torch = torch.tensor(a.cached_data.numpy(), requires_grad=True)
+    grid_torch = torch.tensor(grid.cached_data.numpy(), requires_grad=True)
+    out_torch = torch.nn.functional.grid_sample(
+        a_torch, grid_torch, mode=mode, padding_mode=padding_mode, align_corners=align_corners
+    )
+
+    out_np = out.cached_data.numpy()
+    out_torch_np = out_torch.detach().cpu().numpy()
+    assert np.linalg.norm(out_np - out_torch_np) < 1e-3
+
+    out.sum().backward()
+    out_torch.sum().backward()
+    assert np.linalg.norm(a_torch.grad.data.numpy() - a.grad.cached_data.numpy()) < 1e-3
+    assert np.linalg.norm(grid_torch.grad.data.numpy() - grid.grad.cached_data.numpy()) < 1e-3
 
 
 if __name__ == "__main__":

@@ -148,57 +148,6 @@ class VisionTransformer(nn.Module):
 
         
         # Ours Deformable Attention Initialization
-        '''
-        self.dattn = nn.DeformableAttention(
-            dim=16,                         # Feature dimensions
-            dim_head=4,                    # Dimension per head
-            heads=4,                       # Attention heads
-            dropout=0.,                    # Dropout
-            downsample_factor=4,           # Downsample factor
-            offset_scale=4,                # Offset scale
-            offset_groups=4,               # Offset groups
-            offset_kernel_size=5,          # Offset kernel size
-            group_queries=True,
-            group_key_values=True,
-            to_q_bias = True,
-            to_k_bias = True,
-            to_v_bias = True,
-            to_out_bias = True,
-            device=device,
-            dtype='float32'
-        )
-
-        self.conv_preprocess = nn.Conv(3, 16, 3, stride=1, bias=False, device=device, dtype=dtype)
-        self.conv_postprocess = nn.Conv(16, 3, 3, stride=1, bias=False, device=device, dtype=dtype)
-        '''
-        '''
-        self.dattn = nn.Residual(
-            nn.Sequential(
-                nn.Conv(3, 16, 3, stride=1, bias=False, device=device, dtype=dtype),
-                nn.DeformableAttention(
-                    dim=16,                         # Feature dimensions
-                    dim_head=4,                    # Dimension per head
-                    heads=4,                       # Attention heads
-                    dropout=0.,                    # Dropout
-                    downsample_factor=4,           # Downsample factor
-                    offset_scale=4,                # Offset scale
-                    offset_groups=4,               # Offset groups
-                    offset_kernel_size=5,          # Offset kernel size
-                    group_queries=True,
-                    group_key_values=True,
-                    to_q_bias = True,
-                    to_k_bias = True,
-                    to_v_bias = True,
-                    to_out_bias = True,
-                    device=device,
-                    dtype='float32',
-                    return_out_only=True
-                ),
-                nn.Conv(16, 3, 3, stride=1, bias=False, device=device, dtype=dtype)
-            )
-        )
-        '''
-
         if self.deform_attn_activate:
             self.preproc = nn.Conv(3, in_channels, 3, stride=1, bias=True, device=device, dtype=dtype)
             self.dattn = nn.Residual(

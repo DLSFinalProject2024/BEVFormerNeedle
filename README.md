@@ -1,9 +1,3 @@
 # ViT Needle
-It's the Final Project of CMU 10714.
-Please see more details in the [Report Jupyter Notebook](Final_Report_G13.ipynb), and the [Youtube link](https://youtu.be/Qt14bRrMwx4?si=qB3-vLdEUDCyUUlL) for presentation.
-
-## Installation
-```bash
-$ pip install -r requirements.txt
-$ make
-```
+This project is the Final Project for CMU 10714.
+For more details about the project and to run the code, refer to the [Report Jupyter Notebook](Final_Report_G13.ipynb). Additionally, you can watch the [presentation on YouTube](https://youtu.be/Qt14bRrMwx4?si=qB3-vLdEUDCyUUlL).

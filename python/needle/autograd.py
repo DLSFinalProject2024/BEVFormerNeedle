@@ -1,7 +1,7 @@
 """Core data structures."""
 import needle
 from .backend_numpy import Device, cpu, all_devices
-from typing import List, Optional, NamedTuple, Tuple, Union, Dict
+from typing import List, Optional, NamedTuple, Tuple, Union
 from collections import namedtuple
 import numpy
 
@@ -13,6 +13,9 @@ TENSOR_COUNTER = 0
 
 # NOTE: we will import numpy as the array_api
 # as the backend for our computations, this line will change in later homeworks
+
+import numpy as array_api
+NDArray = numpy.ndarray
 
 from .backend_selection import array_api, NDArray, default_device
 
@@ -355,17 +358,12 @@ class Tensor(Value):
 
     def transpose(self, axes=None):
         return needle.ops.Transpose(axes)(self)
-    
-    def permute(self, axes):
-        return needle.ops.Permute(axes)(self)
 
 
 
 
     __radd__ = __add__
     __rmul__ = __mul__
-
-
 
 def compute_gradient_of_variables(output_tensor, out_grad):
     """Take gradient of output node with respect to each node in node_list.
@@ -382,24 +380,26 @@ def compute_gradient_of_variables(output_tensor, out_grad):
     # Traverse graph in reverse topological order given the output_node that we are taking gradient wrt.
     reverse_topo_order = list(reversed(find_topo_sort([output_tensor])))
 
-    # Note: vi bar is defined as (partial y / partial vi)
-    for node in reverse_topo_order:
-        # Sum the gradients flowing into this node
-        grad_wrt_output = sum_node_list(node_to_output_grads_list[node])
-        # Store adjoint of input node \bar{v_{input}}
-        node.grad = grad_wrt_output
-
-        # No need to propagate gradient through leaf nodes
-        if node.is_leaf():
+    ### BEGIN YOUR SOLUTION
+    for i in reverse_topo_order:
+        if i.op is None:
             continue
-        
-        # Compute the gradients for each input to the node using the node's backward function
-        input_grads = node.op.gradient_as_tuple(grad_wrt_output, node)
-        # Propagate the gradients to the inputs
-        for i, input_node in enumerate(node.inputs):
-            if input_node not in node_to_output_grads_list:
-                node_to_output_grads_list[input_node] = []
-            node_to_output_grads_list[input_node].append(input_grads[i])
+
+        vi_adj = sum_node_list(node_to_output_grads_list[i])
+        vf_adjs = i.op.gradient_as_tuple(vi_adj, i)
+        input_node = i.inputs
+
+        for index, vf_adj in enumerate(vf_adjs):
+            if input_node[index] not in node_to_output_grads_list:
+                node_to_output_grads_list[input_node[index]] = [vf_adj]
+            else:
+                node_to_output_grads_list[input_node[index]].append(vf_adj)
+
+        for node, grad_list in node_to_output_grads_list.items():
+            if node.op is None:
+                node.grad = sum_node_list(grad_list)
+    ### END YOUR SOLUTION
+
 
 
 def find_topo_sort(node_list: List[Value]) -> List[Value]:
@@ -410,21 +410,28 @@ def find_topo_sort(node_list: List[Value]) -> List[Value]:
     after all its predecessors are traversed due to post-order DFS, we get a topological
     sort.
     """
-    visited = set()
+    ### BEGIN YOUR SOLUTION
+    visited = {}
     topo_order = []
     for node in node_list:
         topo_sort_dfs(node, visited, topo_order)
+
     return topo_order
+    ### END YOUR SOLUTION
 
 
 def topo_sort_dfs(node, visited, topo_order):
     """Post-order DFS"""
+    ### BEGIN YOUR SOLUTION
     if node in visited:
         return
-    visited.add(node)
-    for input_node in node.inputs:
-        topo_sort_dfs(input_node, visited, topo_order)
+    
+    for adj_node in node.inputs:
+        topo_sort_dfs(adj_node, visited, topo_order)
+    
+    visited[node] = 1
     topo_order.append(node)
+    ### END YOUR SOLUTION
 
 
 ##############################

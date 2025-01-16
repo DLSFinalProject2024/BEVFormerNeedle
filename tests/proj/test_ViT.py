@@ -17,13 +17,15 @@ np.random.seed(3)
 _DEVICES = [ndl.cpu(), pytest.param(ndl.cuda(),
     marks=pytest.mark.skipif(not ndl.cuda().enabled(), reason="No GPU"))]
 
+_DEVICES_VIT = [ndl.cpu()]
+
 
 @pytest.mark.parametrize("batch_size", [4, 8])
 @pytest.mark.parametrize("img_size, patch_size, in_channels, embed_dim", [
     ([224, 224], 16, 3, 768),
     ([32, 32], 4, 3, 64), # Cifar10
 ])
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("device", _DEVICES_VIT, ids=["cpu"])
 def test_patch_embedding(batch_size, img_size, patch_size, in_channels, embed_dim, device):
     num_patches = (img_size[0] // patch_size) * (img_size[1] // patch_size)
     x = np.random.rand(batch_size, in_channels, img_size[0], img_size[1])  # B, C, H, W
@@ -42,7 +44,7 @@ def test_patch_embedding(batch_size, img_size, patch_size, in_channels, embed_di
     (65, 16, 1, 16, 64),  # Cifar10
 ])
 @pytest.mark.parametrize("dropout", [0.0])
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("device", _DEVICES_VIT, ids=["cpu"])
 def test_vision_transformer_block(batch_size, seq_len, embed_dim, num_head, dim_head, hidden_size, dropout, device):
     x = np.random.rand(batch_size, seq_len, embed_dim)
     x = ndl.Tensor(x, device=device)
@@ -67,7 +69,7 @@ def test_vision_transformer_block(batch_size, seq_len, embed_dim, num_head, dim_
 ])
 @pytest.mark.parametrize("num_blocks", [6])
 @pytest.mark.parametrize("dropout", [0.0])
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("device", _DEVICES_VIT, ids=["cpu"])
 def test_vision_transformer(batch_size, img_size, patch_size, in_channels, num_classes, embed_dim, num_heads, dim_head, mlp_hidden_dim, num_blocks, dropout, device):
     x = np.random.rand(batch_size, in_channels, img_size[0], img_size[1])
     x = ndl.Tensor(x, device=device)

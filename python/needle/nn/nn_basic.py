@@ -11,6 +11,18 @@ class Parameter(Tensor):
     """A special kind of tensor that represents parameters."""
 
 
+def setToTargetDim(var, target):
+    original_ndim = len(var.shape)
+    new_ndim      = len(target.shape)
+
+    ret_shape = list(var.shape)
+    extra_dims = new_ndim - original_ndim
+    if extra_dims > 0:
+        for i in range(extra_dims):
+            ret_shape.append(1)
+    return tuple(ret_shape)
+
+
 def _unpack_params(value: object) -> List[Tensor]:
     if isinstance(value, Parameter):
         return [value]
@@ -87,16 +99,22 @@ class Linear(Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        self.weight = Parameter(
-            init.kaiming_uniform(fan_in=in_features, fan_out=out_features, device=device, dtype=dtype)
-        )
-        self.bias = None
+        ### BEGIN YOUR SOLUTION
+        self.weight = Parameter(init.kaiming_uniform(fan_in=in_features, fan_out=out_features, dtype=dtype, device=device, requires_grad=True))
+        #self.weight = Parameter(self.weight, dtype=dtype)
         if bias:
-            self.bias = init.kaiming_uniform(out_features, 1, device=device, dtype=dtype)
-            self.bias = self.bias.transpose()
-            self.bias = Parameter(self.bias, device=device, dtype=dtype)
+            self.bias = Parameter(init.kaiming_uniform(fan_in=out_features, fan_out=1, dtype=dtype, device=device, requires_grad=True).reshape((1, out_features)))
+            '''
+            self.bias = init.kaiming_uniform(fan_in=out_features, fan_out=1, dtype=dtype)
+            self.bias = ops.reshape(self.bias, (1, -1))
+            self.bias = Parameter(self.bias, dtype=dtype)
+            '''
+        else:
+            self.bias = None
+        ### END YOUR SOLUTION
 
     def forward(self, X: Tensor) -> Tensor:
+        ### BEGIN YOUR SOLUTION
         assert X.shape[-1] == self.in_features, f"Expected input shape ({X.shape[:-1]}, {self.in_features}), got {X.shape}"
         # Added support to handle input with more than 2 dimensions
         original_shape = X.shape
@@ -114,21 +132,42 @@ class Linear(Module):
             y = y.reshape((*original_shape[:-1], self.out_features))
         
         return y
-
+        '''
+        out = ops.matmul(X, self.weight)
+        #X_reshape = ops.reshape(X, (X.shape[0], -1))
+        #out = ops.matmul(X_reshape, self.weight)
+        if self.bias is not None:
+            bias_broad = ops.broadcast_to(self.bias, shape=out.shape)
+            out_res = ops.add(out, bias_broad)
+            return out_res
+        else:
+            return out
+        '''
+        ### END YOUR SOLUTION
 
 class Flatten(Module):
     def forward(self, X):
-        assert len(X.shape) >= 2
-        elem_cnt = 1
-        for i in range(1, len(X.shape)):
-            elem_cnt *= X.shape[i]
+        ### BEGIN YOUR SOLUTION
+        reduced_size = 1
+        for shape_val in X.shape:
+            reduced_size = reduced_size*shape_val
+        reduced_size = reduced_size//X.shape[0]
+        out = ops.reshape(X, (X.shape[0], reduced_size))
+        return out
+        ### END YOUR SOLUTION
 
-        return X.reshape((X.shape[0], elem_cnt))
+class Tanh(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        ### BEGIN YOUR SOLUTION
+        return ops.tanh(x)
+        ### END YOUR SOLUTION
 
 
 class ReLU(Module):
     def forward(self, x: Tensor) -> Tensor:
+        ### BEGIN YOUR SOLUTION
         return ops.relu(x)
+        ### END YOUR SOLUTION
 
 class Sequential(Module):
     def __init__(self, *modules):
@@ -136,17 +175,28 @@ class Sequential(Module):
         self.modules = modules
 
     def forward(self, x: Tensor) -> Tensor:
+        ### BEGIN YOUR SOLUTION
         for module in self.modules:
             x = module(x)
+
         return x
+        ### END YOUR SOLUTION
 
 
 class SoftmaxLoss(Module):
     def forward(self, logits: Tensor, y: Tensor):
-        batch_size, label_size = logits.shape
-        one_hot_y = init.one_hot(label_size, y, device=logits.device, dtype=logits.dtype)
-        true_logits = ops.summation(logits * one_hot_y, axes=(1,))
-        return (ops.logsumexp(logits, axes=(1, )) - true_logits).sum()/batch_size
+        ### BEGIN YOUR SOLUTION
+        k = logits.shape[1]
+        n = logits.shape[0]
+        logsumexp = ops.logsumexp(logits, axes=1)
+        y_one_hot = init.one_hot(k, y, device=logits.device, dtype=logits.dtype, requires_grad=False)
+        neg_part = ops.summation(ops.multiply(logits, y_one_hot), axes=(1,))
+        neg_part_minus = ops.mul_scalar(neg_part, -1)
+        pos_neg_part = ops.add(logsumexp, neg_part_minus)
+        pos_neg_sum = ops.summation(pos_neg_part, axes=(0,))
+        pos_neg_mean = ops.divide_scalar(pos_neg_sum, n)
+        return pos_neg_mean
+        ### END YOUR SOLUTION
 
 
 class BatchNorm1d(Module):
@@ -155,33 +205,58 @@ class BatchNorm1d(Module):
         self.dim = dim
         self.eps = eps
         self.momentum = momentum
-        self.weight = Parameter(init.ones(1, dim, device=device, dtype=dtype), device=device, dtype=dtype)
-        self.bias = Parameter(init.zeros(1, dim, device=device, dtype=dtype), device=device, dtype=dtype)
-        self.running_mean = init.zeros(dim, device=device, dtype=dtype)
-        self.running_var = init.ones(dim, device=device, dtype=dtype)
+        ### BEGIN YOUR SOLUTION
+        self.weight = init.ones(*(1, dim), device=device, dtype=dtype, requires_grad=True)
+        self.weight = Parameter(self.weight, dtype=dtype, device=device)
+        self.bias   = init.zeros(*(1, dim), device=device, dtype=dtype, requires_grad=True)
+        self.bias   = Parameter(self.bias, dtype=dtype, device=device)
+        self.running_mean   = init.zeros(*(dim,), device=device, dtype=dtype).data
+        self.running_var    = init.ones(*(dim,), device=device, dtype=dtype).data
+        ### END YOUR SOLUTION
 
     def forward(self, x: Tensor) -> Tensor:
-        if self.weight.shape != (1, self.dim):
-            self.weight = self.weight.reshape((1, self.dim))
-        if self.bias.shape != (1, self.dim):
-            self.bias = self.bias.reshape((1, self.dim))
+        ### BEGIN YOUR SOLUTION
+        n, d = x.shape
+        restore_shape = ops.restoreShape(x.shape, input_axes=(0,))
 
-        if self.training:
-            batch_size, feature_size = x.shape
-            mean = (x.sum(axes=(0, )) / batch_size).reshape((1, feature_size))
-            var = (((x - mean.broadcast_to(x.shape)) ** 2).sum(axes=(0, )) / batch_size).reshape((1, feature_size))
-            self.running_mean = self.running_mean *(1 - self.momentum) + mean.reshape(self.running_mean.shape) * ( self.momentum)
-            self.running_var = self.running_var *(1 - self.momentum) + var.reshape(self.running_var.shape) * (self.momentum)
-            mean = mean.broadcast_to(x.shape)
-            var = var.broadcast_to(x.shape)
-            std_x = (x - mean) / ops.power_scalar(var + self.eps, 0.5)
-            weight = self.weight.broadcast_to(x.shape)
-            bias = self.bias.broadcast_to(x.shape)
-            return std_x * weight + bias
+        if self.training is False:
+            ux            = ops.reshape(self.running_mean, restore_shape)
+            ux_broad      = ops.broadcast_to(ux, x.shape)
+            x_minus_ux    = x - ux_broad
+            var_resh      = ops.reshape(self.running_var, restore_shape)
+            var_broad     = ops.broadcast_to(var_resh, x.shape)
+            var_eps       = ops.add_scalar(var_broad, self.eps)
+            var_sqrt      = ops.power_scalar(var_eps, 0.5)
+            x_div_var     = ops.divide(x_minus_ux, var_sqrt)
+            weight_broad  = ops.broadcast_to(self.weight, x_div_var.shape)
+            bias_broad    = ops.broadcast_to(self.bias, x_div_var.shape)
+            wx            = ops.multiply(weight_broad, x_div_var)
+            wx_b          = ops.add(wx, bias_broad)
         else:
-            std_x = (x - self.running_mean.broadcast_to(x.shape)) / ops.power_scalar(self.running_var.broadcast_to(x.shape) + self.eps, 0.5)
-            return std_x * self.weight.broadcast_to(x.shape) + self.bias.broadcast_to(x.shape)
+            usum          = ops.summation(x, axes=(0,))
+            ux_div        = ops.divide_scalar(usum, n)
+            ux            = ops.reshape(ux_div, restore_shape)
+            ux_broad      = ops.broadcast_to(ux, x.shape)
+            x_minus_ux    = x - ux_broad
+            x_minus_sq    = ops.multiply(x_minus_ux, x_minus_ux)
+            var_sum       = ops.summation(x_minus_sq, axes=(0,))
+            var_div       = ops.divide_scalar(var_sum, n)
+            var_resh      = ops.reshape(var_div, restore_shape)
+            var_broad     = ops.broadcast_to(var_resh, x.shape)
+            var_eps       = ops.add_scalar(var_broad, self.eps)
+            var_sqrt      = ops.power_scalar(var_eps, 0.5)
+            x_div_var     = ops.divide(x_minus_ux, var_sqrt)
+            weight_broad  = ops.broadcast_to(self.weight, x_div_var.shape)
+            bias_broad    = ops.broadcast_to(self.bias, x_div_var.shape)
+            wx            = ops.multiply(weight_broad, x_div_var)
+            wx_b          = ops.add(wx, bias_broad)
 
+            self.running_mean = self.running_mean*(1-self.momentum) + ux.data.reshape((self.dim,)) * self.momentum
+            self.running_var  = self.running_var*(1-self.momentum) + var_resh.data.reshape((self.dim,))*self.momentum
+            self.running_mean = self.running_mean.reshape((self.dim,))
+            self.running_var  = self.running_var.reshape((self.dim,))
+        return wx_b
+        ### END YOUR SOLUTION
 
 class BatchNorm2d(BatchNorm1d):
     def __init__(self, *args, **kwargs):
@@ -195,23 +270,42 @@ class BatchNorm2d(BatchNorm1d):
         return y.transpose((2,3)).transpose((1,2))
 
 
+
 class LayerNorm1d(Module):
     def __init__(self, dim, eps=1e-5, device=None, dtype="float32"):
         super().__init__()
         self.dim = dim
         self.eps = eps
-        self.weight = Parameter(init.ones(1, dim, device=device, dtype=dtype), device=device, dtype=dtype)
-        self.bias = Parameter(init.zeros(1, dim, device=device, dtype=dtype), device=device, dtype=dtype)
+        ### BEGIN YOUR SOLUTION
+        self.weight = init.ones(*(1, dim), dtype=dtype, device=device, requires_grad=True)
+        self.weight = Parameter(self.weight)
+        self.bias   = init.zeros(*(1, dim), dtype=dtype, device=device, requires_grad=True)
+        self.bias   = Parameter(self.bias)
+        ### END YOUR SOLUTION
 
     def forward(self, x: Tensor) -> Tensor:
-        assert len(x.shape) == 2, "Now layerNorm1d only supports 2D input"
-        batch_size, feature_size = x.shape
-        mean = (x.sum(axes=(1, )) / feature_size).reshape((batch_size, 1)).broadcast_to(x.shape)
-        var = (((x - mean) ** 2).sum(axes=(1, )) / feature_size).reshape((batch_size, 1)).broadcast_to(x.shape)
-        std_x = (x - mean) / ops.power_scalar(var + self.eps, 0.5)
-        weight = self.weight.broadcast_to(x.shape)
-        bias = self.bias.broadcast_to(x.shape)
-        return std_x * weight + bias
+        ### BEGIN YOUR SOLUTION
+        #n, d = x.shape
+        restore_shape = ops.restoreShape(x.shape, input_axes=(1,))
+        usum          = ops.summation(x, axes=(1,))
+        ux_div        = ops.divide_scalar(usum, self.dim)
+        ux            = ops.reshape(ux_div, restore_shape)
+        ux_broad      = ops.broadcast_to(ux, x.shape)
+        x_minus_ux    = x - ux_broad
+        x_minus_sq   = ops.multiply(x_minus_ux, x_minus_ux)
+        var_sum      = ops.summation(x_minus_sq, axes=(1,))
+        var_div      = ops.divide_scalar(var_sum, self.dim)
+        var_resh     = ops.reshape(var_div, restore_shape)
+        var_broad    = ops.broadcast_to(var_resh, x.shape)
+        var_eps      = ops.add_scalar(var_broad, self.eps)
+        var_sqrt     = ops.power_scalar(var_eps, 0.5)
+        x_div_var    = ops.divide(x_minus_ux, var_sqrt)
+        weight_broad = ops.broadcast_to(self.weight, x_div_var.shape)
+        bias_broad   = ops.broadcast_to(self.bias, x_div_var.shape)
+        wx           = ops.multiply(weight_broad, x_div_var)
+        wx_b         = ops.add(wx, bias_broad)
+        return wx_b
+        ### END YOUR SOLUTION
 
 
 class Dropout(Module):
@@ -220,11 +314,13 @@ class Dropout(Module):
         self.p = p
 
     def forward(self, x: Tensor) -> Tensor:
-        if not self.training:
+        ### BEGIN YOUR SOLUTION
+        if self.training is False:
             return x
-
-        mask = init.randb(*x.shape, p=1 - self.p, device=x.device, dtype=x.dtype)
-        return x * mask / (1 - self.p)
+        else:
+            mask = init.randb(*x.shape, p=1-self.p, device=x.device, dtype=x.dtype)
+            return ops.multiply(ops.mul_scalar(x, 1/(1-self.p)), mask)
+        ### END YOUR SOLUTION
 
 
 class Residual(Module):
@@ -233,4 +329,7 @@ class Residual(Module):
         self.fn = fn
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.fn(x) + x
+        ### BEGIN YOUR SOLUTION
+        return ops.add(self.fn(x), x)
+        ### END YOUR SOLUTION
+

@@ -21,34 +21,56 @@ class CIFAR10Dataset(Dataset):
         X - numpy array of images
         y - numpy array of labels
         """
+        ### BEGIN YOUR SOLUTION
+        self.train = train
+        self.p = p
         self.transforms = transforms
+        self.base_folder = base_folder
 
-        train_names = ['data_batch_1', 'data_batch_2', 'data_batch_3', 'data_batch_4', 'data_batch_5']
-        test_names = ['test_batch']
-        names = train_names if train else test_names
-        data_batches = []
-        for name in names:
-            with open(os.path.join(base_folder, name), 'rb') as f:
-                batch = pickle.load(f, encoding='bytes')
-                data_batches.append(batch)
+        if train:
+            self.batchs_names = [f"data_batch_{i}" for i in range(1, 6)]
+        else:
+            self.batchs_names = [f"test_batch"]
+
+        self.X, self.y = self.load_data()
+        self.X = self.X/255.0
+        ### END YOUR SOLUTION
+
+    def load_data(self):
+        import pickle
+        data = []
+        labels = []
+        for batch_name in self.batchs_names:
+            with open(os.path.join(self.base_folder, batch_name), 'rb') as file:
+                batch = pickle.load(file, encoding='bytes')
+                data.append(batch[b'data'])
+                labels.extend(batch[b'labels'])
         
-        # batch.keys() = [b'batch_label', b'labels', b'data', b'filenames']
-        self.X = np.concatenate([batch[b'data'] for batch in data_batches])
-        self.y = np.concatenate([batch[b'labels'] for batch in data_batches])
-
-        # Transform, BCHW
-        self.X = self.X.reshape(-1, 3, 32, 32).astype(np.float32) / 255.0
-        self.y = self.y.astype(np.int64)
+        data = np.vstack(data).reshape(-1, 3, 32, 32).astype(np.float32)
+        labels = np.array(labels, dtype=np.int64)
+        
+        return data, labels
 
     def __getitem__(self, index) -> object:
         """
         Returns the image, label at given index
         Image should be of shape (3, 32, 32)
         """
-        return self.X[index], self.y[index]
+        ### BEGIN YOUR SOLUTION
+        img, label = self.X[index], self.y[index]
+        
+        # Apply transformations if provided
+        if self.transforms:
+            for transform in self.transforms:
+                img = transform(img)
+        
+        return img, label        
+        ### END YOUR SOLUTION
 
     def __len__(self) -> int:
         """
         Returns the total number of examples in the dataset
         """
-        return len(self.X)
+        ### BEGIN YOUR SOLUTION
+        return len(self.y)
+        ### END YOUR SOLUTION

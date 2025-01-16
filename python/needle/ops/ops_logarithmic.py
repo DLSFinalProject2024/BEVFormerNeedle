@@ -7,67 +7,62 @@ from .ops_mathematic import *
 
 from ..backend_selection import array_api, BACKEND 
 
+def restoreShape(input_shape, input_axes):
+    restore_shape = list(input_shape)
+    if input_axes == None:
+        restore_shape = tuple([1 for x in input_shape])
+    else:
+        if isinstance(input_axes, tuple):
+            for i in input_axes:
+                restore_shape[i] = 1
+        else:
+            restore_shape[input_axes] = 1
+    return restore_shape
+
 class LogSoftmax(TensorOp):
     def compute(self, Z):
-        Z -= Z.max(-1, keepdims=True)
-        return Z - array_api.log(array_api.exp(Z).sum(-1, keepdims=True))
+        ### BEGIN YOUR SOLUTION
+        raise NotImplementedError()
+        ### END YOUR SOLUTION
 
     def gradient(self, out_grad, node):
-        # https://indii.org/blog/gradients-of-softmax-and-logsumexp/
-        # d logsoftmax(Z))/ dZ = d (Z - logsumexp(Z)) / dZ
-        # = 1 - d logsumexp(Z) / dZ = 1 - softmax(Z)
-        Z = node.inputs[0]
-        softmax = exp(logsoftmax(Z)) # softmax(Z)
-        return out_grad - softmax * array_api.sum(out_grad.numpy(), axis=-1, keepdims=True)
+        ### BEGIN YOUR SOLUTION
+        raise NotImplementedError()
+        ### END YOUR SOLUTION
 
 
 def logsoftmax(a):
     return LogSoftmax()(a)
 
 
-# Note: `axes` - Tuple of axes to sum and take the maximum element over. 
-# This uses the same conventions as `needle.ops.Summation()`
 class LogSumExp(TensorOp):
     def __init__(self, axes: Optional[tuple] = None):
-        if isinstance(axes, int):
-            axes = (axes,)
         self.axes = axes
-        self.max_Z = None # for reuse in gradient
 
     def compute(self, Z):
-        self.max_Z = Z.max(axis=self.axes, keepdims=True)
-        diff = Z - self.max_Z.broadcast_to(Z.shape)
-        e = array_api.exp(diff)
-        se = array_api.sum(e, axis=self.axes) # don't keepdims
-        lse = array_api.log(se)
-        return lse + self.max_Z.reshape(lse.shape)
-    
+        ### BEGIN YOUR SOLUTION
+        Zmax = Z.max(axis=self.axes, keepdims=True) 
+
+        restore_shape = restoreShape(Z.shape, self.axes)
+        Zmax_reshaped = array_api.reshape(Zmax, restore_shape)
+        Z_minus_Zmax = Z - Zmax_reshaped.broadcast_to(Z.shape)
+        Zexp = array_api.exp(Z_minus_Zmax)
+        Zsum = array_api.sum(Zexp, axis=self.axes)
+        Zres = array_api.log(Zsum) + array_api.reshape(Zmax, Zsum.shape)
+        return Zres
+        ### END YOUR SOLUTION
+
     def gradient(self, out_grad, node):
-        Z = node.inputs[0] # Tensor
-        
-        ## Approach 1: Using the chain rule
-        # e = exp(Z - self.max_Z)
-        # se = summation(e, axes=self.axes)
-        # lse = log(se)
-        # grad = Log().gradient(out_grad, lse)
-        # grad = Summation(axes=self.axes).gradient(grad, se)
-        # grad = Exp().gradient(grad, e)
-        # return grad
+        ### BEGIN YOUR SOLUTION
+        Z = node.inputs[0]
 
-        ## Approach 2: https://indii.org/blog/gradients-of-softmax-and-logsumexp/
-        # Construct reduced shape with dim kept
-        shape = list(Z.shape)
-        axes = range(len(shape)) if self.axes is None else self.axes
-        for axis in axes:
-            shape[axis] = 1
-
-        # Note: by default summation will not keepdims
-        # TODO: make it simpler, find out the correct shape of each term
-        diff = Z - self.max_Z.broadcast_to(Z.shape)
-        softmax = exp(diff) / summation(exp(diff), axes=self.axes).reshape(shape).broadcast_to(Z.shape)
-        out_grad = out_grad.reshape(shape).broadcast_to(Z.shape)
-
-        return out_grad * softmax
+        restore_shape = restoreShape(Z.shape, self.axes)
+        l_reshape = reshape(node, restore_shape)
+        out_grad_reshape = reshape(out_grad, restore_shape)
+        res = exp(Z - l_reshape.broadcast_to(Z.shape))
+        result = multiply(res, out_grad_reshape.broadcast_to(res.shape))
+        return result
+        ### END YOUR SOLUTION
 
 
 def logsumexp(a, axes=None):

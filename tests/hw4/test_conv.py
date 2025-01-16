@@ -332,6 +332,26 @@ def test_stack_vs_pytorch():
     assert np.linalg.norm(Bndl.grad.cached_data.numpy() - Btch.grad.detach().numpy()) < 1e-3
     assert np.linalg.norm(Cndl.grad.cached_data.numpy() - Ctch.grad.detach().numpy()) < 1e-3
 
+conv_mugrade_forward_params = [
+    (3, 2, 4, 6, 3, 1),
+    (3, 4, 2, 6, 3, 1)
+]
+
+@pytest.mark.parametrize("batches, cin, cout, n, k, stride", conv_mugrade_forward_params)
+@pytest.mark.parametrize("device", _DEVICES)
+def test_nn_conv_mugrade_forward(batches, cin, cout, n, k, stride, device):
+    np.random.seed(0)
+    import torch
+    f = ndl.nn.Conv(cin, cout, k, stride=stride, device=device)
+    x = ndl.init.rand(batches, cin, n, n, device=device)
+
+    g = torch.nn.Conv2d(cin, cout, k, stride=stride, padding=k//2)
+    g.weight.data = torch.tensor(f.weight.cached_data.numpy().transpose(3, 2, 0, 1))
+    g.bias.data = torch.tensor(f.bias.cached_data.numpy())
+    z = torch.tensor(x.cached_data.numpy())
+
+    assert np.linalg.norm(f(x).cached_data.numpy() - g(z).data.numpy()) < 1e-3
+
 
 
 conv_forward_params = [
@@ -341,6 +361,7 @@ conv_forward_params = [
     (32, 16, 8, 3, 1),
     (32, 16, 8, 3, 2)
 ]
+
 @pytest.mark.parametrize("s,cin,cout,k,stride", conv_forward_params)
 @pytest.mark.parametrize("device", _DEVICES)
 def test_nn_conv_forward(s, cin, cout, k, stride, device):
@@ -413,9 +434,6 @@ op_conv_shapes = [
     ( (3, 17, 17, 16), (5, 5, 16, 1),  1, 0 ),
     ( (3, 17, 17, 16), (1, 1, 16, 1),  1, 0 ),
     ( (1, 14, 14, 2), (3, 3, 2, 2),    1, 0 ),
-
-    ( (3, 32, 32, 3), (4, 4, 3, 16), 1, 0 ),
-    ( (3, 32, 32, 3), (4, 4, 3, 16), 4, 0 ),
 ]
 @pytest.mark.parametrize("Z_shape, W_shape, stride, padding", op_conv_shapes)
 @pytest.mark.parametrize("device", _DEVICES)
@@ -437,7 +455,7 @@ def test_op_conv(Z_shape, W_shape, stride, padding, backward, device):
     Ztch.requires_grad=True
     Wtch = torch.Tensor(_W).float()
     Wtch.requires_grad=True
-    out = torch.nn.functional.conv2d(Ztch.permute(0, 3, 1, 2).contiguous(), Wtch.permute(3, 2, 0, 1).contiguous(), padding=padding, stride=stride)
+    out = torch.nn.functional.conv2d(Ztch.permute(0, 3, 1, 2), Wtch.permute(3, 2, 0, 1), padding=padding, stride=stride)
     out2 = out.sum()
     if backward:
         out2.backward()

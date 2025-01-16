@@ -14,9 +14,31 @@ import needle.nn as nn
 from apps.models import *
 from needle.data import DataLoader, CIFAR10Dataset
 import time
-device = ndl.cpu() if not ndl.cuda().enabled() else ndl.cuda()
+device = ndl.cpu()
+#device = ndl.cpu() if not ndl.cuda().enabled() else ndl.cuda()
 
-def parse_mnist(image_filename, label_filename):
+import psutil
+import os
+
+def print_memory_usage(message=""):
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    mem_usage = mem_info.rss / (1024 ** 2)
+    print(f"[{message}] Memory usage: {mem_usage:.2f} MB")  # RSS: Resident Set Size
+    return mem_usage
+
+import threading
+import os
+import time
+
+def monitor_memory_usage():
+    process = psutil.Process(os.getpid())
+    while True:
+        mem_info = process.memory_info()
+        print(f"Memory usage: {mem_info.rss / (1024 ** 2):.2f} MB")
+        time.sleep(0.05)  # Adjust the sleep interval as needed
+
+def parse_mnist(image_filesname, label_filename):
     """Read an images and labels file in MNIST format.  See this page:
     http://yann.lecun.com/exdb/mnist/ for a description of the file format.
 
@@ -38,6 +60,7 @@ def parse_mnist(image_filename, label_filename):
                 labels of the examples.  Values should be of type np.int8 and
                 for MNIST will contain the values 0-9.
     """
+    ### BEGIN YOUR SOLUTION
     with gzip.open(image_filename, 'rb') as img_file:
         # '>' as big-endian, 'I' as unsigned int
         magic_number, num_images, num_rows, num_cols = struct.unpack('>IIII', img_file.read(16))
@@ -54,9 +77,10 @@ def parse_mnist(image_filename, label_filename):
         y = np.frombuffer(label_data, dtype=np.uint8)
     
     return X, y
+    ### END YOUR SOLUTION
 
 
-def softmax_loss(Z: ndl.Tensor, y_one_hot: ndl.Tensor):
+def softmax_loss(Z, y_one_hot):
     """Return softmax loss.  Note that for the purposes of this assignment,
     you don't need to worry about "nicely" scaling the numerical properties
     of the log-sum-exp computation, but can just compute this directly.
@@ -72,9 +96,11 @@ def softmax_loss(Z: ndl.Tensor, y_one_hot: ndl.Tensor):
     Returns:
         Average softmax loss over the sample. (ndl.Tensor[np.float32])
     """
+    ### BEGIN YOUR SOLUTION
     logsumexp = ndl.log(ndl.summation(ndl.exp(Z), axes=(1,)))
     Zy = ndl.summation(Z * y_one_hot, axes=(1,))
     return ndl.summation(logsumexp - Zy, axes=(0,)) / Z.shape[0]
+    ### END YOUR SOLUTION
 
 
 def nn_epoch(X, y, W1, W2, lr=0.1, batch=100):
@@ -100,6 +126,8 @@ def nn_epoch(X, y, W1, W2, lr=0.1, batch=100):
             W1: ndl.Tensor[np.float32]
             W2: ndl.Tensor[np.float32]
     """
+
+    ### BEGIN YOUR SOLUTION
     num_examples = X.shape[0]
     k = W2.shape[-1] # num_classes (output_dim)
 
@@ -128,6 +156,7 @@ def nn_epoch(X, y, W1, W2, lr=0.1, batch=100):
         # W2 = ndl.Tensor(W2.numpy() - lr * W2.grad.numpy())
 
     return W1, W2
+    ### END YOUR SOLUTION
 
 ### CIFAR-10 training ###
 def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None):
@@ -148,7 +177,7 @@ def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None)
         avg_loss: average loss over dataset
     """
     np.random.seed(4)
-    
+    ### BEGIN YOUR SOLUTION
     model.eval() if opt is None else model.train()
 
     total_loss = 0
@@ -170,14 +199,14 @@ def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None)
             opt.step()
 
         # Compute metrics
-        total_loss += loss.numpy() * batch_size
-        correct += (logits.numpy().argmax(axis=1) == batch_labels.numpy()).sum()
+        total_loss += loss.detach().numpy() * batch_size
+        correct += (logits.detach().numpy().argmax(axis=1) == batch_labels.detach().numpy()).sum()
 
     avg_loss = total_loss / len(dataloader.dataset)
     avg_acc = correct / len(dataloader.dataset)
 
     return avg_acc.item(), avg_loss.item()
-
+    ### END YOUR SOLUTION
 
 
 def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
@@ -199,14 +228,20 @@ def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
         avg_loss: average loss over dataset from last epoch of training
     """
     np.random.seed(4)
+    ### BEGIN YOUR SOLUTION
     
     opt = optimizer(model.parameters(), lr=lr, weight_decay=weight_decay)
+    avg_acc_list = []
+    avg_loss_list = []
 
     for epoch in range(n_epochs):
         avg_acc, avg_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn(), opt=opt)
-        print(f"Epoch {epoch+1}: avg_acc={avg_acc:.3f}, avg_loss={avg_loss:.3f}")
+        print(f"Training, Epoch {epoch+1}: avg_acc={avg_acc:.3f}, avg_loss={avg_loss:.3f}")
+        avg_acc_list.append(avg_acc)
+        avg_loss_list.append(avg_loss)
 
-    return avg_acc, avg_loss
+    return avg_acc_list, avg_loss_list
+    ### END YOUR SOLUTION
 
 
 def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
@@ -223,9 +258,11 @@ def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
         avg_loss: average loss over dataset
     """
     np.random.seed(4)
-    
+    ### BEGIN YOUR SOLUTION
     avg_acc, avg_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn(), opt=None)
+    print(f"Testing, avg_acc={avg_acc:.3f}, avg_loss={avg_loss:.3f}")
     return avg_acc, avg_loss
+    ### END YOUR SOLUTION
 
 
 ### PTB training ###
@@ -250,38 +287,61 @@ def epoch_general_ptb(data, model, seq_len=40, loss_fn=nn.SoftmaxLoss(), opt=Non
         avg_loss: average loss over dataset
     """
     np.random.seed(4)
-
-    model.eval() if opt is None else model.train()
+    ### BEGIN YOUR SOLUTION
     nbatch, batch_size = data.shape
-    errs = []
-    losses = []
-    h_prev = None
-
-    for i in range(nbatch - seq_len):
-        X, y = ndl.data.get_batch(data, i, seq_len, device=device, dtype=dtype)
-        output, h_prev = model(X, h_prev)
-        loss = loss_fn(output, y)
-        
-        if model.training:
+    avg_loss = []
+    avg_acc  = []
+    sample_num = 0
+    if opt is not None:
+        # Training Mode
+        model.train()
+        h = None
+        for i in range(0, nbatch-1, seq_len):
             opt.reset_grad()
+            batch_x, batch_y = ndl.data.get_batch(batches=data, i=i, bptt=seq_len, device=device, dtype=dtype)
+            out_y, h = model(batch_x, h)
+
+            # h is not updated grad in further sequence for saving memory
+            if isinstance(h, tuple):
+                hi_det_list = []
+                for hi in h:
+                    hi_det_list.append(hi.detach())
+                h = tuple([_ for _ in hi_det_list])
+            else:
+                h = h.detach()
+
+            loss = loss_fn(out_y, batch_y)
             loss.backward()
-            if clip:  # Optional, not implemented
-                nn.utils.clip_grad_norm_(model.parameters(), clip)
             opt.step()
+            avg_loss.append(np.float32(loss.numpy())*batch_y.shape[0])
+            avg_acc.append(np.float32(np.sum(batch_y.numpy() == out_y.numpy().argmax(axis=1))))
+            sample_num += batch_y.shape[0]
+    else:
+        # Testing Mode
+        model.eval()
+        h = None
+        for i in range(0, nbatch-1, seq_len):
+            batch_x, batch_y = ndl.data.get_batch(batches=data, i=i, bptt=seq_len, device=device, dtype=dtype)
+            out_y, h = model(batch_x, h)
 
-        errs.append((output.numpy().argmax(1) != y.numpy()).sum().item())
-        losses.append(loss.numpy().item())
+            # h is not updated grad in further sequence for saving memory
+            if isinstance(h, tuple):
+                hi_det_list = []
+                for hi in h:
+                    hi_det_list.append(hi.detach())
+                h = tuple([_ for _ in hi_det_list])
+            else:
+                h = h.detach()
 
-        # Detach hidden states to prevent backprop through entire sequence
-        if isinstance(h_prev, tuple):  # LSTM
-            h, c = h_prev
-            h_prev = (h.detach(), c.detach())
-        else:  # RNN
-            h_prev = h_prev.detach()
+            loss = loss_fn(out_y, batch_y)
+            avg_loss.append(np.float32(loss.numpy()*batch_y.shape[0]))
+            avg_acc.append(np.float32(np.sum(batch_y.numpy() == out_y.numpy().argmax(axis=1))))
+            sample_num += batch_y.shape[0]
 
-    avg_acc = 1 - sum(errs) / (nbatch - seq_len)
-    avg_loss = sum(losses) / (nbatch - seq_len)
-    return avg_acc, avg_loss
+    avg_loss_val = np.sum(avg_loss)/sample_num
+    avg_acc_val  = np.sum(avg_acc)/sample_num
+    return avg_acc_val, avg_loss_val
+    ### END YOUR SOLUTION
 
 
 def train_ptb(model, data, seq_len=40, n_epochs=1, optimizer=ndl.optim.SGD,
@@ -306,16 +366,17 @@ def train_ptb(model, data, seq_len=40, n_epochs=1, optimizer=ndl.optim.SGD,
         avg_loss: average loss over dataset from last epoch of training
     """
     np.random.seed(4)
-    
+    ### BEGIN YOUR SOLUTION
     opt = optimizer(model.parameters(), lr=lr, weight_decay=weight_decay)
-    for epoch in range(n_epochs):
-        avg_acc, avg_loss = epoch_general_ptb(data, model, seq_len=seq_len, loss_fn=loss_fn(),
-            opt=opt, clip=clip, device=device, dtype=dtype)
-        
-        # print(f"Epoch {epoch+1}: avg_acc={avg_acc:.3f}, avg_loss={avg_loss:.3f}")
-    
-    # return np.array(avg_acc), np.array(avg_loss)
-    return avg_acc, avg_loss
+
+    # Training
+    #monitor_thread = threading.Thread(target=monitor_memory_usage, daemon=True)
+    #monitor_thread.start()
+    for loop_i in range(n_epochs):
+        avg_acc_train, avg_loss_train = epoch_general_ptb(data=data, model=model, seq_len=seq_len, loss_fn=loss_fn(), opt=opt,
+                                                          clip=clip, device=device, dtype=dtype)
+    return avg_acc_train, avg_loss_train
+    ### END YOUR SOLUTION
 
 def evaluate_ptb(model, data, seq_len=40, loss_fn=nn.SoftmaxLoss,
         device=None, dtype="float32"):
@@ -333,10 +394,11 @@ def evaluate_ptb(model, data, seq_len=40, loss_fn=nn.SoftmaxLoss,
         avg_loss: average loss over dataset
     """
     np.random.seed(4)
-    
-    avg_acc, avg_loss = epoch_general_ptb(data, model, seq_len=seq_len, loss_fn=loss_fn(),
-        opt=None, device=device, dtype=dtype)
-    return avg_acc, avg_loss
+    ### BEGIN YOUR SOLUTION
+    avg_acc_test, avg_loss_test = epoch_general_ptb(data=data, model=model, seq_len=seq_len, loss_fn=loss_fn(), opt=None,
+                                                    clip=None, device=device, dtype=dtype)
+    return avg_acc_test, avg_loss_test
+    ### END YOUR SOLUTION
 
 ### CODE BELOW IS FOR ILLUSTRATION, YOU DO NOT NEED TO EDIT
 

@@ -73,6 +73,17 @@ def test_attention_activation(batch_size, num_heads, queries_len, inner_dim, cau
 @pytest.mark.parametrize("dropout", [0.0, 0.1])
 @pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
 def test_attention_layer(batch_size, seq_len, input_dim, num_head, dim_head, causal, dropout, device):
+    current_input_id = "-".join([str(x) for x in (
+        batch_size, seq_len, input_dim, num_head, dim_head, causal, dropout, device
+    )])
+    dump_labels_path = (
+        "./tests/hw4_extra/data_debug/" + 
+        "test_attention_layer-{}_debug.npy"
+        .format(current_input_id))
+    with open (dump_labels_path, 'rb') as f:
+        import pickle
+        prenorm_q, prenorm_k, prenorm_v, proj_q, proj_k, proj_v, attn_result, attn_prob = pickle.load(f)
+
 
     np.random.seed(19943)
 
@@ -109,6 +120,24 @@ def test_attention_layer(batch_size, seq_len, input_dim, num_head, dim_head, cau
 
     with open(labels_path, 'rb') as f:
         label_result = np.load(f)
+
+    '''
+    print(f"golden, prenorm_q = {prenorm_q}")
+    print(f"------------------------------")
+    print(f"golden, prenorm_k = {prenorm_k}")
+    print(f"------------------------------")
+    print(f"golden, prenorm_v = {prenorm_v}")
+    print(f"------------------------------")
+    print(f"golden, proj_q = {proj_q}")
+    print(f"------------------------------")
+    print(f"golden, proj_k = {proj_k}")
+    print(f"------------------------------")
+    print(f"golden, proj_v = {proj_v}")
+    print(f"------------------------------")
+    print(f"golden, attn_result = {attn_result}")
+    print(f"------------------------------")
+    print(f"golden, attn_prob = {attn_prob}")
+    '''
 
     np.testing.assert_allclose(result, label_result, atol=1e-5, rtol=1e-5)
 
@@ -207,6 +236,20 @@ def test_transformer_model(
 
     with open(labels_path, 'rb') as f:
         label_result = np.load(f)
+
+    try:
+        # Perform the assertion
+        np.testing.assert_allclose(result, label_result, atol=1e-5, rtol=1e-5)
+    except AssertionError as e:
+        # Print the error message from the exception
+        print(e)
+    
+        # Find mismatched indices
+        mismatched = np.abs(result - label_result) > (1e-5 + 1e-5 * np.abs(label_result))
+    
+        # Print mismatched values
+        print("Mismatched values in 'result':", result[mismatched])
+        print("Corresponding values in 'label_result':", label_result[mismatched])        
 
     np.testing.assert_allclose(result, label_result, atol=1e-5, rtol=1e-5)
 

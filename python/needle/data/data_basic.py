@@ -51,33 +51,63 @@ class DataLoader:
         shuffle: bool = False,
     ):
 
+        self.batch_idx = 0
         self.dataset = dataset
         self.shuffle = shuffle
         self.batch_size = batch_size
-        self.ordering = np.array_split(np.arange(len(dataset)), range(batch_size, len(dataset), batch_size))
-
-        self.current_batch_idx = 0
+        if not self.shuffle:
+            self.ordering = np.array_split(np.arange(len(dataset)), 
+                                           range(batch_size, len(dataset), batch_size))
 
     def __iter__(self):
-        # Reset the state for a new iteration
-        self.current_batch_idx = 0
+        ### BEGIN YOUR SOLUTION
         if self.shuffle:
-            order = np.arange(len(self.dataset))
-            np.random.shuffle(order)
-            self.ordering = np.array_split(order, 
-                                           range(self.batch_size, len(self.dataset), self.batch_size))
+            self.ordering = np.random.permutation(len(self.dataset))
+        else:
+            self.ordering = np.arange(len(self.dataset))
+
+        self.batches_order = np.array_split(self.ordering, 
+                                            range(self.batch_size, len(self.dataset), self.batch_size))
+
+        self.batch_idx = 0
+        ### END YOUR SOLUTION
         return self
 
     def __next__(self):
-        if self.current_batch_idx >= len(self.ordering):
+        ### BEGIN YOUR SOLUTION
+        if self.batch_idx >= len(self.batches_order):
             raise StopIteration
+
+        current_batch = [self.dataset[x] for x in self.batches_order[self.batch_idx]]
+        current_batch_tensor = [
+            tuple(item for item in sample)
+            if len(sample) > 1 else sample
+            for sample in current_batch
+        ]
+        final_output = [] #n-tuple output
+        item_list = {}
+        one_list = []
+
+        for sample in current_batch_tensor:
+            if isinstance(sample, tuple):
+                for id, item in enumerate(sample):
+                    if id not in item_list:
+                        item_list[id] = [item]
+                    else:
+                        item_list[id].append(item)
+            else:
+                one_list.append(sample)
+
+        if len(one_list) == 0:
+            for key, ele in item_list.items():
+                final_output.append(Tensor(np.array(ele)))
+        else:
+            final_output.append(Tensor(np.array(one_list)))
         
-        batch_indices = self.ordering[self.current_batch_idx]
-        datas = self.dataset[batch_indices]
-        self.current_batch_idx += 1
-        
-        # Return the actual data corresponding to the batch indices
-        return [Tensor(data) for data in datas]
-    
+        self.batch_idx += 1
+        #tensor_batch = Tensor(current_batch)
+        return tuple(final_output)
+        ### END YOUR SOLUTION
+
     def __len__(self):
         return len(self.ordering)

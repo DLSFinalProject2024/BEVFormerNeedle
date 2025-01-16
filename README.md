@@ -1,16 +1,9 @@
 # ViT Needle
-It's the Final Project of CMU 10714
+It's the Final Project of CMU 10714.
+Please see more details in the [Report Jupyter Notebook](Final_Report_G13.ipynb), and the [Youtube link](https://youtu.be/Qt14bRrMwx4?si=qB3-vLdEUDCyUUlL) for presentation.
 
-
-## Preparation
+## Installation
 ```bash
-make
+$ pip install -r requirements.txt
+$ make
 ```
-
-Install the dataset from executing `prepare.ipynb`.
-
-## Testing implementation correctness
-```bash
-python3 -m pytest -l -v -k "patch_embedding"
-```
-
